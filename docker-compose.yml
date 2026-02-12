@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  transcription-service:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - API_KEY=${API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - B2_KEY_ID=${B2_KEY_ID}
+      - B2_APPLICATION_KEY=${B2_APPLICATION_KEY}
+    env_file:
+      - .env
+    restart: unless-stopped
+    volumes:
+      - /tmp/transcription:/tmp

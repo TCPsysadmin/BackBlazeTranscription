@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: media-transcription-service
+    env: docker
+    plan: starter
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      - key: API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: B2_KEY_ID
+        sync: false
+      - key: B2_APPLICATION_KEY
+        sync: false

@@ -1,0 +1,270 @@
+# Media Transcription Service
+
+A scalable backend service that transcribes long-form media files from Backblaze using OpenAI's Whisper API.
+
+## Project Structure
+
+```
+.
+├── main.py                 # FastAPI application entry point
+├── services/               # Service layer components
+│   ├── __init__.py
+│   ├── job_manager.py      # Job state management
+│   ├── transcription_worker.py  # Background job processor
+│   ├── b2_client.py        # Backblaze B2 client
+│   ├── openai_client.py    # OpenAI Whisper client
+│   ├── media_processor.py  # Audio extraction & chunking
+│   └── webhook_client.py   # Webhook callback handler
+├── Dockerfile              # Docker container definition
+├── docker-compose.yml      # Docker Compose configuration
+├── render.yaml             # Render deployment config
+├── requirements.txt        # Python dependencies
+├── .env.example            # Environment variables template
+├── .gitignore              # Git ignore rules
+├── .dockerignore           # Docker ignore rules
+├── README.md               # This file
+└── DEPLOYMENT.md           # Detailed deployment guide
+```
+
+## Features
+
+- Asynchronous job processing with webhook callbacks
+- Audio extraction from video files
+- Intelligent chunking for large files (600s chunks)
+- Parallel transcription processing
+- Automatic retry logic with exponential backoff
+- Idempotent job submission
+- API key authentication
+- Comprehensive error handling and logging
+
+## Quick Start
+
+### Using Start Scripts
+
+**Windows:**
+```bash
+# 1. Copy environment template
+copy .env.example .env
+
+# 2. Edit .env with your API keys
+notepad .env
+
+# 3. Run start script
+start.bat
+```
+
+**Linux/Mac:**
+```bash
+# 1. Copy environment template
+cp .env.example .env
+
+# 2. Edit .env with your API keys
+nano .env
+
+# 3. Make script executable and run
+chmod +x start.sh
+./start.sh
+```
+
+### Using Docker
+
+```bash
+# 1. Copy environment template
+cp .env.example .env
+
+# 2. Edit .env with your API keys
+
+# 3. Start with Docker Compose
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop service
+docker-compose down
+```
+
+## Setup
+
+### Local Development
+
+1. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+2. Install ffmpeg (required for audio processing):
+- Windows: Download from https://ffmpeg.org/download.html
+- Linux: `sudo apt-get install ffmpeg`
+- Mac: `brew install ffmpeg`
+
+3. Configure environment variables:
+```bash
+cp .env.example .env
+# Edit .env with your credentials
+```
+
+4. Run the service:
+```bash
+python main.py
+```
+
+The service will start on `http://localhost:8000`
+
+### Docker Deployment
+
+1. Build the Docker image:
+```bash
+docker build -t media-transcription-service .
+```
+
+2. Run with Docker Compose:
+```bash
+docker-compose up -d
+```
+
+3. Or run directly:
+```bash
+docker run -p 8000:8000 \
+  -e API_KEY=your-api-key \
+  -e OPENAI_API_KEY=your-openai-key \
+  -e B2_KEY_ID=your-b2-key-id \
+  -e B2_APPLICATION_KEY=your-b2-app-key \
+  media-transcription-service
+```
+
+### Render Deployment
+
+1. Push your code to GitHub
+
+2. Connect your repository to Render:
+   - Go to https://dashboard.render.com
+   - Click "New +" → "Blueprint"
+   - Connect your GitHub repository
+   - Render will automatically detect `render.yaml`
+
+3. Set environment variables in Render dashboard:
+   - `API_KEY`: Your service API key
+   - `OPENAI_API_KEY`: Your OpenAI API key
+   - `B2_KEY_ID`: Your Backblaze key ID
+   - `B2_APPLICATION_KEY`: Your Backblaze application key
+
+4. Deploy! Render will build and deploy automatically.
+
+Your service will be available at: `https://your-service-name.onrender.com`
+
+## Testing
+
+Run the test script to verify your deployment:
+
+```bash
+# Local testing
+python test_api.py
+
+# Test remote deployment
+BASE_URL=https://your-service-name.onrender.com python test_api.py
+```
+
+The test script will:
+- Check health endpoint
+- Verify authentication
+- Test job creation
+- Test job status retrieval
+
+## API Endpoints
+
+### POST /transcribe
+Submit a transcription job.
+
+**Headers:**
+- `X-API-KEY`: Your API key
+
+**Request Body:**
+```json
+{
+  "b2_bucket": "my-bucket",
+  "b2_file_path": "path/to/media.mp4",
+  "callback_url": "https://your-webhook.com/callback"
+}
+```
+
+**Response:**
+```json
+{
+  "job_id": "uuid",
+  "status": "queued"
+}
+```
+
+### GET /jobs/{job_id}
+Get job status and progress.
+
+**Headers:**
+- `X-API-KEY`: Your API key
+
+**Response:**
+```json
+{
+  "job_id": "uuid",
+  "status": "processing",
+  "progress": 45,
+  "error": null,
+  "transcript": null
+}
+```
+
+### Webhook Callback
+When a job completes or fails, the service POSTs to your callback URL:
+
+**Success:**
+```json
+{
+  "job_id": "uuid",
+  "status": "completed",
+  "transcript": "Full transcription text..."
+}
+```
+
+**Failure:**
+```json
+{
+  "job_id": "uuid",
+  "status": "failed",
+  "error": "Error description"
+}
+```
+
+## Architecture
+
+- `main.py`: FastAPI application and API endpoints
+- `services/`:
+  - `job_manager.py`: Job state management
+  - `transcription_worker.py`: Background job processor
+  - `b2_client.py`: Backblaze B2 integration
+  - `openai_client.py`: OpenAI Whisper API client
+  - `media_processor.py`: Audio extraction and chunking
+  - `webhook_client.py`: Webhook callback delivery
+
+## Error Handling
+
+The service handles various error scenarios:
+- `file_not_found`: Media file doesn't exist in B2
+- `unsupported_format`: Media format not supported
+- `audio_extraction_failed`: Failed to extract audio
+- `chunking_failed`: Failed to split audio
+- `transcription_failed`: OpenAI API error
+
+Retryable HTTP errors (408, 429, 500, 502, 503, 504) are automatically retried up to 3 times with exponential backoff.
+
+## Supported Formats
+
+**Audio:** mp3, wav, m4a, flac, ogg, aac
+**Video:** mp4, mov, avi, mkv, webm
+
+## Configuration
+
+- Chunk duration: 600 seconds (10 minutes)
+- Max chunk size: 20 MB
+- Max retries: 3
+- Webhook retries: 3
+- Job check interval: 5 seconds
