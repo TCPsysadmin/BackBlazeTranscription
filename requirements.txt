@@ -6,5 +6,4 @@ b2sdk==1.33.0
 pydub==0.25.1
 httpx==0.26.0
 python-dotenv==1.0.0
-fastapi-scalar==0.1.0
 requests==2.31.0
