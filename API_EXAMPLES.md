@@ -49,7 +49,7 @@ curl -X POST http://localhost:8000/transcribe \
   }'
 ```
 ```bash
-curl -X POST http://localhost:8000/transcribeHTTP \
+curl -X POST https://asanatranscription.onrender.com/transcribeHTTP \
   -H "X-API-KEY: your-secret-api-key" \
   -H "X-Upload-Transcript: true" \
   -H "Content-Type: application/json" \

@@ -9,10 +9,10 @@ class OpenAITranscriber:
     """Client for OpenAI transcription API"""
     
     def __init__(self, api_key: str):
-        # Increase timeout for large audio files (default is 10 minutes)
+        # Increase timeout for large audio files (default is 15 minutes)
         self.client = AsyncOpenAI(
             api_key=api_key,
-            timeout=600.0  # 10 minutes timeout
+            timeout=900.0  # 15 minutes timeout
         )
     
     async def transcribe(self, audio_file_path: str) -> str:

@@ -18,6 +18,7 @@ API_KEY = os.getenv("API_KEY", "your-secret-api-key")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 B2_KEY_ID = os.getenv("B2_KEY_ID")
 B2_APPLICATION_KEY = os.getenv("B2_APPLICATION_KEY")
+MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "3"))  # Limit concurrent job processing
 
 job_manager = JobManager()
 worker = None
@@ -27,7 +28,13 @@ worker = None
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
     global worker
-    worker = TranscriptionWorker(job_manager, OPENAI_API_KEY, B2_KEY_ID, B2_APPLICATION_KEY)
+    worker = TranscriptionWorker(
+        job_manager, 
+        OPENAI_API_KEY, 
+        B2_KEY_ID, 
+        B2_APPLICATION_KEY,
+        max_concurrent_jobs=MAX_CONCURRENT_JOBS
+    )
     asyncio.create_task(worker.process_jobs())
     yield
     # Cleanup on shutdown

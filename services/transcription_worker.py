@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class TranscriptionWorker:
     """Processes transcription jobs in the background"""
     
-    def __init__(self, job_manager, openai_api_key: str, b2_key_id: str, b2_app_key: str):
+    def __init__(self, job_manager, openai_api_key: str, b2_key_id: str, b2_app_key: str, max_concurrent_jobs: int = 3):
         self.job_manager = job_manager
         self.openai_client = OpenAITranscriber(openai_api_key)
         self.b2_client = B2Client(b2_key_id, b2_app_key)
@@ -25,6 +25,9 @@ class TranscriptionWorker:
         self.media_processor = MediaProcessor()
         self.running = True
         self.temp_dir = tempfile.mkdtemp()
+        self.max_concurrent_jobs = max_concurrent_jobs
+        self.active_jobs = set()  # Track currently processing job IDs
+        self.semaphore = asyncio.Semaphore(max_concurrent_jobs)  # Limit concurrent jobs
     
     def stop(self):
         """Stop the worker"""
@@ -32,19 +35,41 @@ class TranscriptionWorker:
     
     async def process_jobs(self):
         """Main worker loop"""
-        logger.info("Transcription worker started")
+        logger.info(f"Transcription worker started (max concurrent jobs: {self.max_concurrent_jobs})")
         
         while self.running:
             try:
                 queued_jobs = self.job_manager.get_queued_jobs()
                 
                 for job in queued_jobs:
-                    asyncio.create_task(self.process_job(job["job_id"]))
+                    job_id = job["job_id"]
+                    
+                    # Skip if already processing
+                    if job_id in self.active_jobs:
+                        continue
+                    
+                    # Try to acquire semaphore without blocking
+                    if self.semaphore.locked():
+                        logger.debug(f"Max concurrent jobs ({self.max_concurrent_jobs}) reached, waiting...")
+                        break  # Don't start more jobs this iteration
+                    
+                    # Mark as active and start processing
+                    self.active_jobs.add(job_id)
+                    asyncio.create_task(self._process_job_wrapper(job_id))
                 
                 await asyncio.sleep(5)  # Check for new jobs every 5 seconds
             except Exception as e:
                 logger.error(f"Worker error: {e}")
                 await asyncio.sleep(5)
+    
+    async def _process_job_wrapper(self, job_id: str):
+        """Wrapper to handle semaphore and cleanup"""
+        async with self.semaphore:
+            try:
+                await self.process_job(job_id)
+            finally:
+                # Remove from active jobs when done
+                self.active_jobs.discard(job_id)
     
     async def process_job(self, job_id: str):
         """Process a single transcription job"""
