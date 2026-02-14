@@ -84,7 +84,20 @@ class TranscriptionWorker:
             logger.info(f"Job {job_id}: Merging transcripts")
             full_transcript = self._merge_transcripts(transcripts)
             
-            # Step 6: Update job and send callback
+            # Step 6: Upload transcript to B2 (if requested)
+            transcript_b2_path = None
+            if job.get("upload_transcript", False):
+                try:
+                    logger.info(f"Job {job_id}: Uploading transcript to B2")
+                    transcript_b2_path = await self._upload_transcript(job, full_transcript)
+                    logger.info(f"Job {job_id}: Transcript uploaded to {transcript_b2_path}")
+                except Exception as upload_error:
+                    logger.warning(f"Job {job_id}: Failed to upload transcript to B2: {upload_error}")
+                    # Don't fail the job if upload fails, just log it
+            else:
+                logger.info(f"Job {job_id}: Skipping transcript upload (not requested)")
+            
+            # Step 7: Update job and send callback
             self.job_manager.update_job(
                 job_id,
                 status="completed",
@@ -92,19 +105,30 @@ class TranscriptionWorker:
                 transcript=full_transcript
             )
             
-            await self.webhook_client.send_callback(
+            webhook_payload = {
+                "job_id": job_id,
+                "status": "completed",
+                "b2_bucket": job["b2_bucket"],
+                "b2_file_path": job["b2_file_path"],
+                "transcript": full_transcript
+            }
+            
+            # Add transcript B2 path if upload succeeded
+            if transcript_b2_path:
+                webhook_payload["transcript_b2_path"] = transcript_b2_path
+            
+            webhook_success = await self.webhook_client.send_callback(
                 job["callback_url"],
-                {
-                    "job_id": job_id,
-                    "status": "completed",
-                    "transcript": full_transcript
-                }
+                webhook_payload
             )
             
-            logger.info(f"Job {job_id}: Completed successfully")
+            if webhook_success:
+                logger.info(f"Job {job_id}: Completed successfully")
+            else:
+                logger.warning(f"Job {job_id}: Completed but webhook delivery failed")
             
         except Exception as e:
-            logger.error(f"Job {job_id} failed: {e}")
+            logger.error(f"Job {job_id} failed: {e}", exc_info=True)
             error_msg = str(e)
             
             self.job_manager.update_job(
@@ -113,14 +137,29 @@ class TranscriptionWorker:
                 error=error_msg
             )
             
-            await self.webhook_client.send_callback(
-                job["callback_url"],
-                {
-                    "job_id": job_id,
-                    "status": "failed",
-                    "error": error_msg
-                }
-            )
+            # Try to send failure webhook, but don't fail if it doesn't work
+            try:
+                webhook_success = await self.webhook_client.send_callback(
+                    job["callback_url"],
+                    {
+                        "job_id": job_id,
+                        "status": "failed",
+                        "b2_bucket": job["b2_bucket"],
+                        "b2_file_path": job["b2_file_path"],
+                        "error": error_msg
+                    }
+                )
+                
+                if not webhook_success:
+                    logger.warning(
+                        f"Job {job_id}: Failed and webhook delivery also failed. "
+                        f"Job status can be retrieved via API."
+                    )
+            except Exception as webhook_error:
+                logger.error(
+                    f"Job {job_id}: Failed and webhook delivery raised exception: {webhook_error}. "
+                    f"Job status can be retrieved via API."
+                )
         
         finally:
             # Cleanup temp files
@@ -128,16 +167,26 @@ class TranscriptionWorker:
     
     async def _download_media(self, job: dict) -> str:
         """Download media file from B2"""
+        from services.b2_client import B2DownloadError
+        
         try:
-            local_path = os.path.join(self.temp_dir, f"{job['job_id']}_media")
+            # Extract file extension from B2 file path
+            file_extension = Path(job["b2_file_path"]).suffix
+            if not file_extension:
+                file_extension = ".bin"  # Fallback for files without extension
+            
+            # Preserve extension in local filename
+            local_path = os.path.join(self.temp_dir, f"{job['job_id']}_media{file_extension}")
+            
             await self.b2_client.download_file(
                 job["b2_bucket"],
                 job["b2_file_path"],
                 local_path
             )
             return local_path
-        except FileNotFoundError:
-            raise Exception("file_not_found")
+        except B2DownloadError as e:
+            # Re-raise B2 errors with their specific error messages
+            raise Exception(str(e))
         except Exception as e:
             raise Exception(f"download_failed: {e}")
     
@@ -156,13 +205,27 @@ class TranscriptionWorker:
             raise Exception(f"chunking_failed: {e}")
     
     async def _transcribe_chunks(self, job_id: str, chunks: list[str]) -> list[str]:
-        """Transcribe all chunks in parallel"""
-        tasks = []
-        for i, chunk_path in enumerate(chunks):
-            task = self._transcribe_chunk_with_retry(job_id, chunk_path, i, len(chunks))
-            tasks.append(task)
+        """Transcribe all chunks with controlled concurrency to avoid overwhelming the API"""
+        # Limit concurrent transcriptions to avoid rate limits and connection issues
+        max_concurrent = 3  # Process 3 chunks at a time
         
-        return await asyncio.gather(*tasks)
+        results = []
+        for i in range(0, len(chunks), max_concurrent):
+            batch = chunks[i:i + max_concurrent]
+            batch_tasks = []
+            
+            for chunk_path in batch:
+                chunk_index = chunks.index(chunk_path)
+                task = self._transcribe_chunk_with_retry(job_id, chunk_path, chunk_index, len(chunks))
+                batch_tasks.append(task)
+            
+            # Process batch and collect results
+            batch_results = await asyncio.gather(*batch_tasks)
+            results.extend(batch_results)
+            
+            logger.info(f"Job {job_id}: Completed batch {i//max_concurrent + 1}/{(len(chunks) + max_concurrent - 1)//max_concurrent}")
+        
+        return results
     
     async def _transcribe_chunk_with_retry(
         self, job_id: str, chunk_path: str, chunk_index: int, total_chunks: int
@@ -184,17 +247,25 @@ class TranscriptionWorker:
                 
             except Exception as e:
                 retry_count += 1
+                error_type = type(e).__name__
                 error_code = getattr(e, "status_code", None)
                 
                 # Check if error is retryable
+                # Retry on: timeout errors, rate limits, and server errors
                 retryable_codes = [408, 429, 500, 502, 503, 504]
-                if error_code not in retryable_codes or retry_count >= max_retries:
-                    logger.error(f"Job {job_id}: Chunk {chunk_index} failed: {e}")
+                is_timeout = "timeout" in error_type.lower() or "timeout" in str(e).lower()
+                is_retryable = error_code in retryable_codes or is_timeout
+                
+                if not is_retryable or retry_count >= max_retries:
+                    logger.error(f"Job {job_id}: Chunk {chunk_index} failed after {retry_count} attempts: {e}")
                     raise Exception(f"transcription_failed: {e}")
                 
                 # Exponential backoff
                 wait_time = 2 ** retry_count
-                logger.warning(f"Job {job_id}: Chunk {chunk_index} retry {retry_count}/{max_retries} after {wait_time}s")
+                logger.warning(
+                    f"Job {job_id}: Chunk {chunk_index} retry {retry_count}/{max_retries} "
+                    f"after {wait_time}s (error: {error_type})"
+                )
                 await asyncio.sleep(wait_time)
         
         raise Exception(f"transcription_failed: max retries exceeded")
@@ -202,6 +273,44 @@ class TranscriptionWorker:
     def _merge_transcripts(self, transcripts: list[str]) -> str:
         """Merge chunk transcripts in order"""
         return " ".join(transcripts)
+    
+    async def _upload_transcript(self, job: dict, transcript: str) -> str:
+        """Upload transcript as .txt file to B2 in the same directory as the original file"""
+        from services.b2_client import B2UploadError
+        
+        try:
+            # Generate transcript filename based on original file path
+            original_path = job["b2_file_path"]
+            
+            # Remove extension and add .txt
+            # e.g., "folder/audio.mp3" -> "folder/audio_transcript.txt"
+            path_without_ext = os.path.splitext(original_path)[0]
+            transcript_path = f"{path_without_ext}_transcript.txt"
+            
+            # Create temporary file with transcript content
+            temp_transcript_path = os.path.join(self.temp_dir, f"{job['job_id']}_transcript.txt")
+            with open(temp_transcript_path, 'w', encoding='utf-8') as f:
+                f.write(transcript)
+            
+            # Upload to B2
+            await self.b2_client.upload_file(
+                job["b2_bucket"],
+                temp_transcript_path,
+                transcript_path
+            )
+            
+            # Clean up temp file
+            try:
+                os.remove(temp_transcript_path)
+            except Exception as e:
+                logger.warning(f"Failed to delete temp transcript file: {e}")
+            
+            return transcript_path
+            
+        except B2UploadError as e:
+            raise Exception(f"Failed to upload transcript: {e}")
+        except Exception as e:
+            raise Exception(f"Failed to upload transcript: {e}")
     
     def _cleanup_files(self, file_paths: list[str]):
         """Delete temporary files"""

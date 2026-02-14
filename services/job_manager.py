@@ -12,7 +12,7 @@ class JobManager:
         self.jobs: Dict[str, dict] = {}
         self.lock = Lock()
     
-    def create_job(self, b2_bucket: str, b2_file_path: str, callback_url: str) -> str:
+    def create_job(self, b2_bucket: str, b2_file_path: str, callback_url: str, upload_transcript: bool = False) -> str:
         """Create a new transcription job"""
         job_id = str(uuid.uuid4())
         
@@ -22,6 +22,7 @@ class JobManager:
                 "b2_bucket": b2_bucket,
                 "b2_file_path": b2_file_path,
                 "callback_url": callback_url,
+                "upload_transcript": upload_transcript,
                 "status": "queued",
                 "progress": 0,
                 "created_at": datetime.utcnow().isoformat(),

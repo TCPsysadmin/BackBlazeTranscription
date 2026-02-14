@@ -108,10 +108,10 @@ curl http://localhost:8000/jobs/abc-123-def \
 
 ## Need Help?
 
+- **Interactive API Docs:** Visit `/docs` endpoint (e.g., http://localhost:8000/docs)
 - **Full Documentation:** See `README.md`
 - **Deployment Guide:** See `DEPLOYMENT.md`
 - **Deployment Checklist:** See `CHECKLIST.md`
-- **API Reference:** Visit `/docs` endpoint when service is running
 
 ## Common Issues
 

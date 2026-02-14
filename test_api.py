@@ -89,6 +89,7 @@ def main():
     """Run all tests"""
     print(f"Testing API at: {BASE_URL}")
     print(f"Using API Key: {API_KEY[:10]}...")
+    print(f"API Docs: {BASE_URL}/docs")
     print("=" * 50)
     
     try:

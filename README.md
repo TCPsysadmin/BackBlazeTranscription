@@ -23,19 +23,27 @@ A scalable backend service that transcribes long-form media files from Backblaze
 ├── .gitignore              # Git ignore rules
 ├── .dockerignore           # Docker ignore rules
 ├── README.md               # This file
-└── DEPLOYMENT.md           # Detailed deployment guide
+├── QUICKSTART.md           # 5-minute getting started guide
+├── DEPLOYMENT.md           # Detailed deployment guide
+├── CHECKLIST.md            # Deployment checklist
+├── TROUBLESHOOTING.md      # Common issues and solutions
+├── LARGE_FILES.md          # Large file handling guide
+├── API_EXAMPLES.md         # Code examples in multiple languages
+└── CHANGELOG.md            # Version history and changes
 ```
 
 ## Features
 
 - Asynchronous job processing with webhook callbacks
-- Audio extraction from video files
-- Intelligent chunking for large files (600s chunks)
+- Audio extraction from video files using ffmpeg (optimized for large files)
+- Intelligent chunking for large files (600s chunks, stream-based processing)
 - Parallel transcription processing
+- Automatic transcript upload to B2 (saved as .txt file in same directory)
 - Automatic retry logic with exponential backoff
 - Idempotent job submission
 - API key authentication
 - Comprehensive error handling and logging
+- Optimized for large files (tested with 3.5GB+ files)
 
 ## Quick Start
 
@@ -94,9 +102,11 @@ pip install -r requirements.txt
 ```
 
 2. Install ffmpeg (required for audio processing):
-- Windows: Download from https://ffmpeg.org/download.html
+- Windows: See `WINDOWS_SETUP.md` for detailed instructions
 - Linux: `sudo apt-get install ffmpeg`
 - Mac: `brew install ffmpeg`
+
+**Note:** ffmpeg is required for efficient processing of large files. The service will fall back to slower methods if ffmpeg is not available, but this is not recommended for production use.
 
 3. Configure environment variables:
 ```bash
@@ -173,6 +183,22 @@ The test script will:
 
 ## API Endpoints
 
+### Interactive Documentation
+
+Visit `/docs` when the service is running to access the beautiful Scalar API documentation with:
+- Complete endpoint descriptions with examples
+- Request/response schemas
+- Try-it-out functionality (test endpoints directly from the browser)
+- Webhook payload documentation
+- Code generation in multiple languages
+
+**Local:** http://localhost:8000/docs  
+**Production:** https://your-service.onrender.com/docs
+
+The root URL (`/`) automatically redirects to the documentation.
+
+For complete code examples in multiple languages, see `API_EXAMPLES.md`.
+
 ### POST /transcribe
 Submit a transcription job.
 
@@ -248,18 +274,45 @@ When a job completes or fails, the service POSTs to your callback URL:
 ## Error Handling
 
 The service handles various error scenarios:
+- `bucket_not_found`: B2 bucket doesn't exist
 - `file_not_found`: Media file doesn't exist in B2
 - `unsupported_format`: Media format not supported
 - `audio_extraction_failed`: Failed to extract audio
 - `chunking_failed`: Failed to split audio
 - `transcription_failed`: OpenAI API error
+- `download_error`: Network or B2 access error
+- `b2_error`: B2 API error
 
 Retryable HTTP errors (408, 429, 500, 502, 503, 504) are automatically retried up to 3 times with exponential backoff.
+
+**Webhook Delivery:** If webhook delivery fails (e.g., 404, network error), the service will:
+1. Retry up to 3 times with exponential backoff
+2. Skip retries for client errors (4xx except 408, 429)
+3. Log the failure but keep job status available via API
+4. Allow you to retrieve results via GET /jobs/{job_id}
 
 ## Supported Formats
 
 **Audio:** mp3, wav, m4a, flac, ogg, aac
 **Video:** mp4, mov, avi, mkv, webm
+
+**File Size:** Optimized for large files (tested with 3.5GB+ files)
+- Uses stream-based processing (doesn't load entire file into memory)
+- ffmpeg-based extraction and chunking for performance
+- Automatic fallback to pydub if ffmpeg not available
+
+For detailed information on large file handling, see `LARGE_FILES.md`.
+
+## Troubleshooting
+
+For detailed troubleshooting of common issues, see `TROUBLESHOOTING.md`.
+
+Quick checks:
+- Verify environment variables are set correctly
+- Check API keys are valid
+- Ensure B2 bucket and file paths are correct
+- Test webhook URL is accessible
+- Review service logs for detailed error messages
 
 ## Configuration
 
