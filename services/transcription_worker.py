@@ -12,6 +12,8 @@ from services.webhook_client import WebhookClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+# Reduce noise from B2/requests connection pool (pool full is non-fatal)
+logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
 
 # Limit concurrent chunk transcriptions per job (1 = minimal disk/RAM; safe for 512MB)
 CONCURRENT_CHUNKS_DEFAULT = int(os.getenv("CONCURRENT_CHUNKS", "1"))
@@ -89,42 +91,15 @@ class TranscriptionWorker:
         temp_files = []
         
         try:
-            # Step 1: Download media from B2
-            logger.info(f"Job {job_id}: Downloading from B2")
-            media_path = await self._download_media(job)
-            temp_files.append(media_path)
+            # Stream B2 → ffmpeg → segments: never write full file to disk (avoids 2GB+ eviction)
+            logger.info(f"Job {job_id}: Streaming B2 → ffmpeg → segments (no full file on disk)")
+            transcripts = await self._stream_b2_to_transcription(job_id, job)
             
-            # Step 2: Extract audio
-            logger.info(f"Job {job_id}: Extracting audio")
-            audio_path = await self._extract_audio(media_path)
-            if audio_path != media_path:
-                temp_files.append(audio_path)
-                # Free disk immediately: original media no longer needed
-                self._cleanup_files([media_path])
-                temp_files.remove(media_path)
-            
-            # Step 3: Get chunk info (no files created yet - just metadata)
-            logger.info(f"Job {job_id}: Getting chunk info")
-            duration_seconds, num_chunks = await self.media_processor.get_chunk_info(
-                audio_path, chunk_duration=CHUNK_DURATION_SECONDS
-            )
-            self.job_manager.update_job(job_id, chunks_total=num_chunks)
-            
-            # Step 4: Transcribe chunks incrementally (create → transcribe → delete, one at a time)
-            # This keeps peak disk usage to: audio file + 1 chunk file
-            logger.info(f"Job {job_id}: Transcribing {num_chunks} chunks incrementally (concurrent={self.max_concurrent_chunks})")
-            transcripts = await self._transcribe_chunks_incremental(job_id, audio_path, num_chunks, duration_seconds)
-            
-            # Free disk: audio file no longer needed after all chunks processed
-            if audio_path in temp_files:
-                temp_files.remove(audio_path)
-            self._cleanup_files([audio_path])
-            
-            # Step 5: Merge transcripts
+            # Merge transcripts
             logger.info(f"Job {job_id}: Merging transcripts")
             full_transcript = self._merge_transcripts(transcripts)
             
-            # Step 6: Upload transcript to B2 (if requested)
+            # Upload transcript to B2 (if requested)
             transcript_b2_path = None
             if job.get("upload_transcript", False):
                 try:
@@ -137,7 +112,7 @@ class TranscriptionWorker:
             else:
                 logger.info(f"Job {job_id}: Skipping transcript upload (not requested)")
             
-            # Step 7: Update job and send callback
+            # Update job and send callback
             self.job_manager.update_job(
                 job_id,
                 status="completed",
@@ -202,8 +177,111 @@ class TranscriptionWorker:
                 )
         
         finally:
-            # Cleanup temp files
+            # Cleanup any temp files (streaming path uses none; kept for consistency)
             self._cleanup_files(temp_files)
+    
+    async def _stream_b2_to_transcription(self, job_id: str, job: dict) -> list[str]:
+        """Stream B2 file through ffmpeg to segment files; transcribe each segment and delete.
+        Never writes the full media file to disk, so stays under 2GB temp limit.
+        """
+        from services.b2_client import B2DownloadError
+        
+        segment_dir = os.path.join(self.temp_dir, f"{job_id}_segments")
+        os.makedirs(segment_dir, exist_ok=True)
+        try:
+            r, w = os.pipe()
+            try:
+                # Open write end for B2; B2 will close it when done
+                stream = os.fdopen(w, "wb")
+                w = -1  # so we don't close it again
+                
+                # Start B2 download writing to pipe (runs in executor, closes stream when done)
+                b2_task = asyncio.create_task(
+                    self.b2_client.download_to_stream(
+                        job["b2_bucket"], job["b2_file_path"], stream
+                    )
+                )
+                
+                # ffmpeg reads from pipe, writes chunk_000.mp3, chunk_001.mp3, ... to segment_dir
+                proc = await self.media_processor.run_ffmpeg_stream_to_segments(
+                    r, segment_dir, CHUNK_DURATION_SECONDS
+                )
+                r = -1  # ffmpeg process holds it
+                
+                # Process segments as they complete: transcribe and delete
+                results = {}
+                processed = set()
+                poll_interval = 2.0
+                
+                while True:
+                    # List current segment files
+                    indices = set()
+                    for name in os.listdir(segment_dir):
+                        if name.startswith("chunk_") and name.endswith(".mp3"):
+                            try:
+                                idx = int(name[6:9])  # chunk_XXX.mp3
+                                indices.add(idx)
+                            except ValueError:
+                                pass
+                    
+                    for i in sorted(indices):
+                        if i in processed:
+                            continue
+                        # Chunk i is complete when chunk i+1 exists or ffmpeg has exited
+                        if (i + 1) in indices or proc.returncode is not None:
+                            path = os.path.join(segment_dir, f"chunk_{i:03d}.mp3")
+                            if os.path.exists(path):
+                                try:
+                                    transcript = await self._transcribe_chunk_with_retry(
+                                        job_id, path, i, max(indices) + 1 if indices else 1
+                                    )
+                                    results[i] = transcript
+                                    self.job_manager.update_progress(
+                                        job_id, len(results), max(indices) + 1 if indices else 1
+                                    )
+                                finally:
+                                    self._cleanup_files([path])
+                                processed.add(i)
+                    
+                    if proc.returncode is not None:
+                        if not indices or len(processed) >= len(indices):
+                            break
+                    await asyncio.sleep(poll_interval)
+                
+                await b2_task
+                await proc.wait()
+                if proc.returncode != 0 and proc.returncode is not None:
+                    stderr = (await proc.stderr.read()).decode(errors="replace") if proc.stderr else ""
+                    raise Exception(f"ffmpeg_stream_failed: exit {proc.returncode} {stderr[:500]}")
+                
+                # Return transcripts in order
+                num_chunks = max(results.keys()) + 1 if results else 0
+                self.job_manager.update_job(job_id, chunks_total=num_chunks)
+                return [results.get(i, "") for i in range(num_chunks)]
+                
+            finally:
+                if w >= 0:
+                    try:
+                        os.close(w)
+                    except OSError:
+                        pass
+                if r >= 0:
+                    try:
+                        os.close(r)
+                    except OSError:
+                        pass
+        except B2DownloadError as e:
+            raise Exception(str(e))
+        except Exception as e:
+            raise Exception(f"stream_failed: {e}")
+        finally:
+            # Remove segment dir (any remaining files)
+            try:
+                for name in os.listdir(segment_dir):
+                    self._cleanup_files([os.path.join(segment_dir, name)])
+                os.rmdir(segment_dir)
+            except Exception as ex:
+                logger.warning(f"Cleanup segment dir: {ex}")
     
     async def _download_media(self, job: dict) -> str:
         """Download media file from B2"""

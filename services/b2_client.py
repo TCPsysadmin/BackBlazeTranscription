@@ -101,6 +101,39 @@ class B2Client:
         # Run in thread pool to avoid blocking
         await asyncio.get_event_loop().run_in_executor(None, _download)
     
+    async def download_to_stream(self, bucket_name: str, file_path: str, stream):
+        """Stream download from B2 to a file-like object (e.g. pipe). Never writes full file to disk.
+        Pass allow_seeking=False so B2 uses sequential download (required for pipes).
+        """
+        def _stream():
+            try:
+                api = self._get_api()
+                bucket = api.get_bucket_by_name(bucket_name)
+                downloaded_file = bucket.download_file_by_name(file_path)
+                # save() accepts file-like; allow_seeking=False for sequential (pipe-friendly)
+                if not hasattr(downloaded_file, "save"):
+                    raise B2DownloadError(
+                        "b2sdk version does not support stream download (save). "
+                        "Upgrade b2sdk for large-file streaming."
+                    )
+                downloaded_file.save(stream, allow_seeking=False)
+                logger.info(f"Streamed {file_path} from bucket {bucket_name}")
+            except NonExistentBucket:
+                raise B2DownloadError(f"bucket_not_found: {bucket_name}")
+            except FileNotPresent:
+                raise B2DownloadError(f"file_not_found: {file_path}")
+            except B2Error as e:
+                raise B2DownloadError(f"b2_error: {str(e)}")
+            except Exception as e:
+                raise B2DownloadError(f"download_error: {str(e)}")
+            finally:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+        
+        await asyncio.get_event_loop().run_in_executor(None, _stream)
+    
     async def upload_file(self, bucket_name: str, local_path: str, remote_path: str):
         """Upload a file from local path to B2"""
         def _upload():

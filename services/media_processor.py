@@ -273,3 +273,35 @@ class MediaProcessor:
                 raise Exception(f"Failed to create chunk {chunk_index}: {e}")
         
         return await asyncio.get_event_loop().run_in_executor(None, _create_chunk)
+    
+    @staticmethod
+    async def run_ffmpeg_stream_to_segments(
+        pipe_read_fd: int, output_dir: str, segment_time_seconds: int
+    ) -> "asyncio.subprocess.Process":
+        """Run ffmpeg reading from pipe (stdin), extract audio and write segment files.
+        Does not load the full input into disk; peak disk = ~2 segment files.
+        Caller must close pipe_read_fd after the process is created (ffmpeg holds it).
+        Returns the Process; segment files appear in output_dir as chunk_000.mp3, chunk_001.mp3, ...
+        """
+        os.makedirs(output_dir, exist_ok=True)
+        segment_pattern = os.path.join(output_dir, "chunk_%03d.mp3")
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", "pipe:0",
+            "-vn",
+            "-acodec", "libmp3lame", "-q:a", "2",
+            "-f", "segment",
+            "-segment_time", str(segment_time_seconds),
+            "-segment_format", "mp3",
+            "-reset_timestamps", "1",
+            "-segment_list_type", "null",
+            segment_pattern,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=pipe_read_fd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=output_dir,
+        )
+        return proc
