@@ -91,16 +91,22 @@ class TranscriptionWorker:
         temp_files = []
         
         try:
-            # Try streaming first (best for large files), fallback to incremental if it fails
-            try:
-                logger.info(f"Job {job_id}: Attempting streaming path (B2 → ffmpeg → segments)")
-                transcripts = await self._stream_b2_to_transcription(job_id, job)
-            except Exception as stream_error:
-                logger.warning(
-                    f"Job {job_id}: Streaming failed ({stream_error}), falling back to incremental chunking"
-                )
-                # Fallback: download file, then process incrementally (still better than before)
+            # MP4/MOV etc. have metadata (moov) at end of file → ffmpeg can't parse from pipe.
+            # Use incremental path (download then process) for those; stream only for pipe-friendly formats.
+            ext = Path(job["b2_file_path"]).suffix.lower()
+            STREAM_UNSAFE_EXTS = {".mp4", ".mov", ".m4a", ".avi", ".mkv", ".webm", ".3gp", ".3g2", ".mj2"}
+            if ext in STREAM_UNSAFE_EXTS:
+                logger.info(f"Job {job_id}: Format {ext} is not pipe-streamable, using incremental path")
                 transcripts = await self._incremental_chunk_transcription(job_id, job)
+            else:
+                try:
+                    logger.info(f"Job {job_id}: Attempting streaming path (B2 → ffmpeg → segments)")
+                    transcripts = await self._stream_b2_to_transcription(job_id, job)
+                except Exception as stream_error:
+                    logger.warning(
+                        f"Job {job_id}: Streaming failed ({stream_error}), falling back to incremental chunking"
+                    )
+                    transcripts = await self._incremental_chunk_transcription(job_id, job)
             
             # Merge transcripts
             logger.info(f"Job {job_id}: Merging transcripts")
