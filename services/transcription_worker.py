@@ -91,9 +91,16 @@ class TranscriptionWorker:
         temp_files = []
         
         try:
-            # Stream B2 → ffmpeg → segments: never write full file to disk (avoids 2GB+ eviction)
-            logger.info(f"Job {job_id}: Streaming B2 → ffmpeg → segments (no full file on disk)")
-            transcripts = await self._stream_b2_to_transcription(job_id, job)
+            # Try streaming first (best for large files), fallback to incremental if it fails
+            try:
+                logger.info(f"Job {job_id}: Attempting streaming path (B2 → ffmpeg → segments)")
+                transcripts = await self._stream_b2_to_transcription(job_id, job)
+            except Exception as stream_error:
+                logger.warning(
+                    f"Job {job_id}: Streaming failed ({stream_error}), falling back to incremental chunking"
+                )
+                # Fallback: download file, then process incrementally (still better than before)
+                transcripts = await self._incremental_chunk_transcription(job_id, job)
             
             # Merge transcripts
             logger.info(f"Job {job_id}: Merging transcripts")
@@ -188,41 +195,112 @@ class TranscriptionWorker:
         
         segment_dir = os.path.join(self.temp_dir, f"{job_id}_segments")
         os.makedirs(segment_dir, exist_ok=True)
+        logger.info(f"Job {job_id}: Created segment dir: {segment_dir}")
+        
         try:
             r, w = os.pipe()
+            stream = None
+            proc = None
+            b2_task = None
             try:
                 # Open write end for B2; B2 will close it when done
                 stream = os.fdopen(w, "wb")
                 w = -1  # so we don't close it again
+                logger.info(f"Job {job_id}: Opened pipe for streaming")
                 
                 # Start B2 download writing to pipe (runs in executor, closes stream when done)
+                logger.info(
+                    f"Job {job_id}: Starting B2 stream download "
+                    f"(bucket={job['b2_bucket']}, path={job['b2_file_path']})"
+                )
                 b2_task = asyncio.create_task(
-                    self.b2_client.download_to_stream(
-                        job["b2_bucket"], job["b2_file_path"], stream
+                    asyncio.wait_for(
+                        self.b2_client.download_to_stream(
+                            job["b2_bucket"], job["b2_file_path"], stream
+                        ),
+                        timeout=300.0  # 5 minute timeout for B2 download
                     )
                 )
                 
                 # ffmpeg reads from pipe, writes chunk_000.mp3, chunk_001.mp3, ... to segment_dir
+                logger.info(f"Job {job_id}: Starting ffmpeg stream-to-segments...")
                 proc = await self.media_processor.run_ffmpeg_stream_to_segments(
                     r, segment_dir, CHUNK_DURATION_SECONDS
                 )
                 r = -1  # ffmpeg process holds it
+                logger.info(f"Job {job_id}: ffmpeg started (PID: {proc.pid})")
                 
                 # Process segments as they complete: transcribe and delete
                 results = {}
                 processed = set()
                 poll_interval = 2.0
+                no_segments_timeout = 60.0  # If no segments after 60s, something is wrong
+                last_segment_time = asyncio.get_event_loop().time()
+                initial_wait = True
                 
+                logger.info(f"Job {job_id}: Starting segment processing loop...")
                 while True:
+                    # Check if B2 download failed
+                    if b2_task.done():
+                        try:
+                            await b2_task
+                            logger.info(f"Job {job_id}: B2 download completed successfully")
+                        except asyncio.TimeoutError:
+                            logger.error(f"Job {job_id}: B2 download timed out after 5 minutes")
+                            if proc and proc.returncode is None:
+                                try:
+                                    proc.terminate()
+                                    await asyncio.wait_for(proc.wait(), timeout=5.0)
+                                except Exception:
+                                    proc.kill()
+                            raise Exception("B2 download timed out")
+                        except Exception as e:
+                            logger.error(f"Job {job_id}: B2 download failed: {e}", exc_info=True)
+                            # Kill ffmpeg if B2 failed
+                            if proc and proc.returncode is None:
+                                try:
+                                    proc.terminate()
+                                    await asyncio.wait_for(proc.wait(), timeout=5.0)
+                                except Exception:
+                                    proc.kill()
+                            raise Exception(f"B2 download failed: {e}")
+                    
                     # List current segment files
                     indices = set()
-                    for name in os.listdir(segment_dir):
-                        if name.startswith("chunk_") and name.endswith(".mp3"):
+                    try:
+                        for name in os.listdir(segment_dir):
+                            if name.startswith("chunk_") and name.endswith(".mp3"):
+                                try:
+                                    idx = int(name[6:9])  # chunk_XXX.mp3
+                                    indices.add(idx)
+                                except ValueError:
+                                    pass
+                    except Exception as e:
+                        logger.warning(f"Job {job_id}: Error listing segment dir: {e}")
+                    
+                    if indices:
+                        last_segment_time = asyncio.get_event_loop().time()
+                        initial_wait = False
+                        logger.debug(f"Job {job_id}: Found {len(indices)} segment files")
+                    
+                    # Check timeout: if no segments after initial wait, something is wrong
+                    if initial_wait and (asyncio.get_event_loop().time() - last_segment_time) > no_segments_timeout:
+                        logger.error(f"Job {job_id}: Timeout waiting for first segment after {no_segments_timeout}s")
+                        if proc and proc.returncode is None:
                             try:
-                                idx = int(name[6:9])  # chunk_XXX.mp3
-                                indices.add(idx)
-                            except ValueError:
-                                pass
+                                stderr = ""
+                                if proc.stderr:
+                                    try:
+                                        stderr_data = await asyncio.wait_for(proc.stderr.read(), timeout=1.0)
+                                        stderr = stderr_data.decode(errors="replace")[:1000]
+                                    except Exception:
+                                        pass
+                                logger.error(f"Job {job_id}: ffmpeg stderr: {stderr}")
+                                proc.terminate()
+                                await asyncio.wait_for(proc.wait(), timeout=5.0)
+                            except Exception:
+                                proc.kill()
+                        raise Exception(f"No segments produced after {no_segments_timeout}s. ffmpeg may have failed.")
                     
                     for i in sorted(indices):
                         if i in processed:
@@ -231,6 +309,7 @@ class TranscriptionWorker:
                         if (i + 1) in indices or proc.returncode is not None:
                             path = os.path.join(segment_dir, f"chunk_{i:03d}.mp3")
                             if os.path.exists(path):
+                                logger.info(f"Job {job_id}: Processing chunk {i}")
                                 try:
                                     transcript = await self._transcribe_chunk_with_retry(
                                         job_id, path, i, max(indices) + 1 if indices else 1
@@ -239,19 +318,31 @@ class TranscriptionWorker:
                                     self.job_manager.update_progress(
                                         job_id, len(results), max(indices) + 1 if indices else 1
                                     )
+                                    logger.info(f"Job {job_id}: Chunk {i} transcribed successfully")
                                 finally:
                                     self._cleanup_files([path])
                                 processed.add(i)
                     
                     if proc.returncode is not None:
+                        logger.info(f"Job {job_id}: ffmpeg exited with code {proc.returncode}")
                         if not indices or len(processed) >= len(indices):
                             break
                     await asyncio.sleep(poll_interval)
                 
+                # Wait for both to complete
+                logger.info(f"Job {job_id}: Waiting for B2 download and ffmpeg to complete...")
                 await b2_task
                 await proc.wait()
+                
                 if proc.returncode != 0 and proc.returncode is not None:
-                    stderr = (await proc.stderr.read()).decode(errors="replace") if proc.stderr else ""
+                    stderr = ""
+                    if proc.stderr:
+                        try:
+                            stderr_data = await proc.stderr.read()
+                            stderr = stderr_data.decode(errors="replace")[:1000]
+                        except Exception:
+                            pass
+                    logger.error(f"Job {job_id}: ffmpeg failed: exit {proc.returncode}, stderr: {stderr}")
                     raise Exception(f"ffmpeg_stream_failed: exit {proc.returncode} {stderr[:500]}")
                 
                 # Return transcripts in order
@@ -260,6 +351,7 @@ class TranscriptionWorker:
                 return [results.get(i, "") for i in range(num_chunks)]
                 
             finally:
+                # Cleanup: close pipe ends if not already closed
                 if w >= 0:
                     try:
                         os.close(w)
@@ -270,9 +362,25 @@ class TranscriptionWorker:
                         os.close(r)
                     except OSError:
                         pass
+                # Close stream if still open
+                if stream:
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
+                # Kill ffmpeg if still running
+                if proc and proc.returncode is None:
+                    try:
+                        logger.warning(f"Job {job_id}: Killing ffmpeg process")
+                        proc.terminate()
+                        await asyncio.wait_for(proc.wait(), timeout=5.0)
+                    except Exception:
+                        proc.kill()
         except B2DownloadError as e:
+            logger.error(f"Job {job_id}: B2DownloadError: {e}")
             raise Exception(str(e))
         except Exception as e:
+            logger.error(f"Job {job_id}: Stream failed: {e}", exc_info=True)
             raise Exception(f"stream_failed: {e}")
         finally:
             # Remove segment dir (any remaining files)
@@ -282,6 +390,49 @@ class TranscriptionWorker:
                 os.rmdir(segment_dir)
             except Exception as ex:
                 logger.warning(f"Cleanup segment dir: {ex}")
+    
+    async def _incremental_chunk_transcription(self, job_id: str, job: dict) -> list[str]:
+        """Fallback: Download file, extract audio, then create chunks incrementally.
+        Still better than creating all chunks at once, but writes full file to disk first.
+        """
+        logger.info(f"Job {job_id}: Using incremental chunking fallback")
+        temp_files = []
+        
+        try:
+            # Download media
+            logger.info(f"Job {job_id}: Downloading media from B2")
+            media_path = await self._download_media(job)
+            temp_files.append(media_path)
+            
+            # Extract audio
+            logger.info(f"Job {job_id}: Extracting audio")
+            audio_path = await self._extract_audio(media_path)
+            if audio_path != media_path:
+                temp_files.append(audio_path)
+                self._cleanup_files([media_path])
+                temp_files.remove(media_path)
+            
+            # Get chunk info
+            logger.info(f"Job {job_id}: Getting chunk info")
+            duration_seconds, num_chunks = await self.media_processor.get_chunk_info(
+                audio_path, chunk_duration=CHUNK_DURATION_SECONDS
+            )
+            self.job_manager.update_job(job_id, chunks_total=num_chunks)
+            
+            # Transcribe chunks incrementally
+            logger.info(f"Job {job_id}: Transcribing {num_chunks} chunks incrementally")
+            transcripts = await self._transcribe_chunks_incremental(
+                job_id, audio_path, num_chunks, duration_seconds
+            )
+            
+            # Cleanup audio file
+            if audio_path in temp_files:
+                temp_files.remove(audio_path)
+            self._cleanup_files([audio_path])
+            
+            return transcripts
+        finally:
+            self._cleanup_files(temp_files)
     
     async def _download_media(self, job: dict) -> str:
         """Download media file from B2"""
