@@ -329,21 +329,36 @@ class TranscriptionWorker:
                             break
                     await asyncio.sleep(poll_interval)
                 
-                # Wait for both to complete
-                logger.info(f"Job {job_id}: Waiting for B2 download and ffmpeg to complete...")
-                await b2_task
-                await proc.wait()
-                
+                # If ffmpeg failed, do NOT wait for B2 (B2 may block forever writing to a pipe no one reads)
                 if proc.returncode != 0 and proc.returncode is not None:
                     stderr = ""
                     if proc.stderr:
                         try:
-                            stderr_data = await proc.stderr.read()
-                            stderr = stderr_data.decode(errors="replace")[:1000]
+                            stderr_data = await asyncio.wait_for(proc.stderr.read(), timeout=2.0)
+                            stderr = stderr_data.decode(errors="replace")[:2000]
                         except Exception:
                             pass
                     logger.error(f"Job {job_id}: ffmpeg failed: exit {proc.returncode}, stderr: {stderr}")
+                    # Cancel B2 task so we don't hang (B2 writing to pipe with no reader blocks)
+                    b2_task.cancel()
+                    try:
+                        await b2_task
+                    except asyncio.CancelledError:
+                        pass
                     raise Exception(f"ffmpeg_stream_failed: exit {proc.returncode} {stderr[:500]}")
+                
+                # ffmpeg succeeded; wait for B2 to finish (it may still be flushing)
+                logger.info(f"Job {job_id}: Waiting for B2 download to complete...")
+                try:
+                    await asyncio.wait_for(b2_task, timeout=30.0)
+                except asyncio.TimeoutError:
+                    b2_task.cancel()
+                    try:
+                        await b2_task
+                    except asyncio.CancelledError:
+                        pass
+                    logger.warning(f"Job {job_id}: B2 task did not finish in time (ignored, ffmpeg already done)")
+                await proc.wait()
                 
                 # Return transcripts in order
                 num_chunks = max(results.keys()) + 1 if results else 0
