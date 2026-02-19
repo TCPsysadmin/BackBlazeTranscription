@@ -205,3 +205,71 @@ class MediaProcessor:
             except Exception as pydub_error:
                 logger.error(f"Failed to get duration with pydub: {pydub_error}")
                 raise Exception(f"Could not determine audio duration. Please install ffmpeg/ffprobe.")
+    
+    async def get_chunk_info(self, audio_path: str, chunk_duration: int = 600) -> tuple[float, int]:
+        """Get audio duration and number of chunks without creating any files.
+        Returns: (duration_seconds, num_chunks)
+        """
+        def _get_info():
+            try:
+                duration_seconds = self._get_audio_duration(audio_path)
+                if duration_seconds <= chunk_duration:
+                    return (duration_seconds, 1)
+                num_chunks = int(duration_seconds / chunk_duration) + 1
+                return (duration_seconds, num_chunks)
+            except Exception as e:
+                logger.error(f"Failed to get chunk info: {e}")
+                raise Exception(f"Cannot get chunk info: {e}")
+        
+        return await asyncio.get_event_loop().run_in_executor(None, _get_info)
+    
+    async def create_single_chunk(
+        self, audio_path: str, chunk_index: int, chunk_duration: int, output_dir: str
+    ) -> str | None:
+        """Create a single chunk file on-demand. Returns path to chunk file, or None if past end of audio.
+        This allows incremental processing: create chunk, transcribe, delete, repeat.
+        """
+        def _create_chunk():
+            try:
+                # Calculate start time for this chunk
+                start_time = chunk_index * chunk_duration
+                chunk_path = os.path.join(output_dir, f"chunk_{chunk_index}.mp3")
+                
+                # Use ffmpeg to extract single chunk without loading full file
+                cmd = [
+                    'ffmpeg',
+                    '-i', audio_path,
+                    '-ss', str(start_time),  # Start time
+                    '-t', str(chunk_duration),  # Duration
+                    '-acodec', 'copy',  # Copy codec (fast, no re-encoding)
+                    '-y',  # Overwrite
+                    chunk_path
+                ]
+                
+                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                
+                # Verify chunk was created
+                if os.path.exists(chunk_path):
+                    chunk_size_mb = os.path.getsize(chunk_path) / (1024 * 1024)
+                    logger.info(f"Created chunk {chunk_index}: {chunk_size_mb:.2f}MB")
+                    
+                    if chunk_size_mb > self.MAX_CHUNK_SIZE_MB:
+                        logger.warning(f"Chunk {chunk_index} exceeds {self.MAX_CHUNK_SIZE_MB}MB: {chunk_size_mb:.2f}MB")
+                    
+                    return chunk_path
+                else:
+                    logger.warning(f"Chunk {chunk_index} was not created, may be past end of audio")
+                    return None
+                    
+            except subprocess.CalledProcessError as e:
+                # If ffmpeg fails, chunk may be past end of audio
+                if "Invalid data found" in e.stderr or "End of file" in e.stderr:
+                    logger.debug(f"Chunk {chunk_index} past end of audio")
+                    return None
+                logger.error(f"ffmpeg error creating chunk {chunk_index}: {e.stderr}")
+                raise Exception(f"Failed to create chunk {chunk_index}: {e.stderr}")
+            except Exception as e:
+                logger.error(f"Unexpected error creating chunk {chunk_index}: {e}")
+                raise Exception(f"Failed to create chunk {chunk_index}: {e}")
+        
+        return await asyncio.get_event_loop().run_in_executor(None, _create_chunk)

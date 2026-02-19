@@ -103,22 +103,22 @@ class TranscriptionWorker:
                 self._cleanup_files([media_path])
                 temp_files.remove(media_path)
             
-            # Step 3: Chunk audio
-            logger.info(f"Job {job_id}: Chunking audio")
-            chunks = await self._chunk_audio(audio_path)
-            # Free disk: delete source audio only when we have separate chunk files (not when short file returned as single chunk)
-            if len(chunks) > 1 or (len(chunks) == 1 and chunks[0] != audio_path):
-                if audio_path in temp_files:
-                    temp_files.remove(audio_path)
-                self._cleanup_files([audio_path])
-            # Chunks are deleted one-by-one after transcription; track for any leftover cleanup
-            temp_files.extend(chunks)
+            # Step 3: Get chunk info (no files created yet - just metadata)
+            logger.info(f"Job {job_id}: Getting chunk info")
+            duration_seconds, num_chunks = await self.media_processor.get_chunk_info(
+                audio_path, chunk_duration=CHUNK_DURATION_SECONDS
+            )
+            self.job_manager.update_job(job_id, chunks_total=num_chunks)
             
-            self.job_manager.update_job(job_id, chunks_total=len(chunks))
+            # Step 4: Transcribe chunks incrementally (create → transcribe → delete, one at a time)
+            # This keeps peak disk usage to: audio file + 1 chunk file
+            logger.info(f"Job {job_id}: Transcribing {num_chunks} chunks incrementally (concurrent={self.max_concurrent_chunks})")
+            transcripts = await self._transcribe_chunks_incremental(job_id, audio_path, num_chunks, duration_seconds)
             
-            # Step 4: Transcribe chunks (one at a time by default); delete each chunk after use
-            logger.info(f"Job {job_id}: Transcribing {len(chunks)} chunks (concurrent={self.max_concurrent_chunks})")
-            transcripts = await self._transcribe_chunks(job_id, chunks)
+            # Free disk: audio file no longer needed after all chunks processed
+            if audio_path in temp_files:
+                temp_files.remove(audio_path)
+            self._cleanup_files([audio_path])
             
             # Step 5: Merge transcripts
             logger.info(f"Job {job_id}: Merging transcripts")
@@ -246,8 +246,83 @@ class TranscriptionWorker:
         except Exception as e:
             raise Exception(f"chunking_failed: {e}")
     
+    async def _transcribe_chunks_incremental(
+        self, job_id: str, audio_path: str, num_chunks: int, duration_seconds: float
+    ) -> list[str]:
+        """Transcribe chunks incrementally: create chunk → transcribe → delete → repeat.
+        Peak disk usage: audio file + 1 chunk file (or max_concurrent_chunks chunk files).
+        This prevents exceeding temp storage limits on large files.
+        """
+        max_concurrent = max(1, self.max_concurrent_chunks)
+        results = [None] * num_chunks
+        
+        # If only 1 chunk and it's the original audio file, transcribe directly
+        if num_chunks == 1:
+            logger.info(f"Job {job_id}: Single chunk, transcribing original audio file")
+            transcript = await self._transcribe_chunk_with_retry(job_id, audio_path, 0, 1)
+            return [transcript]
+        
+        # Process chunks in batches (but create/delete incrementally within each batch)
+        for batch_start in range(0, num_chunks, max_concurrent):
+            batch_size = min(max_concurrent, num_chunks - batch_start)
+            batch_tasks = []
+            
+            # Create and transcribe chunks in this batch
+            for i in range(batch_size):
+                chunk_index = batch_start + i
+                task = self._create_and_transcribe_chunk(
+                    job_id, audio_path, chunk_index, num_chunks
+                )
+                batch_tasks.append((chunk_index, task))
+            
+            # Wait for batch to complete
+            batch_transcripts = await asyncio.gather(*[t for _, t in batch_tasks])
+            for (chunk_index, _), transcript in zip(batch_tasks, batch_transcripts):
+                results[chunk_index] = transcript
+            
+            logger.info(
+                f"Job {job_id}: Completed batch {batch_start // max_concurrent + 1}/{(num_chunks + max_concurrent - 1) // max_concurrent}"
+            )
+        
+        return results
+    
+    async def _create_and_transcribe_chunk(
+        self, job_id: str, audio_path: str, chunk_index: int, total_chunks: int
+    ) -> str:
+        """Create a single chunk, transcribe it, then delete it immediately.
+        Returns the transcript text.
+        """
+        chunk_path = None
+        try:
+            # Create chunk on-demand
+            chunk_path = await self.media_processor.create_single_chunk(
+                audio_path,
+                chunk_index,
+                CHUNK_DURATION_SECONDS,
+                self.temp_dir
+            )
+            
+            if chunk_path is None:
+                # Chunk past end of audio (shouldn't happen if num_chunks calculated correctly)
+                logger.warning(f"Job {job_id}: Chunk {chunk_index} is past end of audio")
+                return ""
+            
+            # Transcribe chunk
+            transcript = await self._transcribe_chunk_with_retry(
+                job_id, chunk_path, chunk_index, total_chunks
+            )
+            
+            return transcript
+            
+        finally:
+            # Always delete chunk file immediately after use (even if transcription failed)
+            if chunk_path:
+                self._cleanup_files([chunk_path])
+    
     async def _transcribe_chunks(self, job_id: str, chunks: list[str]) -> list[str]:
-        """Transcribe chunks with limited concurrency; delete each chunk file immediately after use to minimize disk usage."""
+        """Legacy method: Transcribe pre-created chunks. Kept for backward compatibility.
+        Use _transcribe_chunks_incremental for new code to minimize disk usage.
+        """
         max_concurrent = max(1, self.max_concurrent_chunks)
         results = [None] * len(chunks)  # preserve order
 
