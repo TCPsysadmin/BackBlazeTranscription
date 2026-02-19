@@ -1,4 +1,10 @@
-"""Media processing utilities"""
+"""Media processing utilities.
+
+ffmpeg/ffprobe are used for: (1) extracting audio from video, (2) getting audio duration
+without loading the file, (3) chunking audio without loading the full file into memory.
+The pydub fallback loads entire files into RAM and is not suitable for large files or
+low-memory environments (e.g. 512MB); ensure ffmpeg is installed on the system.
+"""
 import asyncio
 import logging
 import os

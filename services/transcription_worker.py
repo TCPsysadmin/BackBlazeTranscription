@@ -13,11 +13,16 @@ from services.webhook_client import WebhookClient
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Limit concurrent chunk transcriptions per job (1 = minimal disk/RAM; safe for 512MB)
+CONCURRENT_CHUNKS_DEFAULT = int(os.getenv("CONCURRENT_CHUNKS", "1"))
+# Chunk duration in seconds; longer = fewer chunk files on disk (default 600 = 10 min)
+CHUNK_DURATION_SECONDS = int(os.getenv("CHUNK_DURATION_SECONDS", "600"))
+
 
 class TranscriptionWorker:
-    """Processes transcription jobs in the background"""
+    """Processes transcription jobs in the background (optimized for low memory/disk)"""
     
-    def __init__(self, job_manager, openai_api_key: str, b2_key_id: str, b2_app_key: str, max_concurrent_jobs: int = 3):
+    def __init__(self, job_manager, openai_api_key: str, b2_key_id: str, b2_app_key: str, max_concurrent_jobs: int = 1):
         self.job_manager = job_manager
         self.openai_client = OpenAITranscriber(openai_api_key)
         self.b2_client = B2Client(b2_key_id, b2_app_key)
@@ -28,6 +33,7 @@ class TranscriptionWorker:
         self.max_concurrent_jobs = max_concurrent_jobs
         self.active_jobs = set()  # Track currently processing job IDs
         self.semaphore = asyncio.Semaphore(max_concurrent_jobs)  # Limit concurrent jobs
+        self.max_concurrent_chunks = CONCURRENT_CHUNKS_DEFAULT
     
     def stop(self):
         """Stop the worker"""
@@ -93,16 +99,25 @@ class TranscriptionWorker:
             audio_path = await self._extract_audio(media_path)
             if audio_path != media_path:
                 temp_files.append(audio_path)
+                # Free disk immediately: original media no longer needed
+                self._cleanup_files([media_path])
+                temp_files.remove(media_path)
             
             # Step 3: Chunk audio
             logger.info(f"Job {job_id}: Chunking audio")
             chunks = await self._chunk_audio(audio_path)
+            # Free disk: delete source audio only when we have separate chunk files (not when short file returned as single chunk)
+            if len(chunks) > 1 or (len(chunks) == 1 and chunks[0] != audio_path):
+                if audio_path in temp_files:
+                    temp_files.remove(audio_path)
+                self._cleanup_files([audio_path])
+            # Chunks are deleted one-by-one after transcription; track for any leftover cleanup
             temp_files.extend(chunks)
             
             self.job_manager.update_job(job_id, chunks_total=len(chunks))
             
-            # Step 4: Transcribe chunks in parallel
-            logger.info(f"Job {job_id}: Transcribing {len(chunks)} chunks")
+            # Step 4: Transcribe chunks (one at a time by default); delete each chunk after use
+            logger.info(f"Job {job_id}: Transcribing {len(chunks)} chunks (concurrent={self.max_concurrent_chunks})")
             transcripts = await self._transcribe_chunks(job_id, chunks)
             
             # Step 5: Merge transcripts
@@ -223,33 +238,35 @@ class TranscriptionWorker:
             raise Exception(f"audio_extraction_failed: {e}")
     
     async def _chunk_audio(self, audio_path: str) -> list[str]:
-        """Split audio into chunks"""
+        """Split audio into chunks (duration from env for fewer chunks on low-disk)"""
         try:
-            return await self.media_processor.chunk_audio(audio_path, chunk_duration=600)
+            return await self.media_processor.chunk_audio(
+                audio_path, chunk_duration=CHUNK_DURATION_SECONDS
+            )
         except Exception as e:
             raise Exception(f"chunking_failed: {e}")
     
     async def _transcribe_chunks(self, job_id: str, chunks: list[str]) -> list[str]:
-        """Transcribe all chunks with controlled concurrency to avoid overwhelming the API"""
-        # Limit concurrent transcriptions to avoid rate limits and connection issues
-        max_concurrent = 3  # Process 3 chunks at a time
-        
-        results = []
+        """Transcribe chunks with limited concurrency; delete each chunk file immediately after use to minimize disk usage."""
+        max_concurrent = max(1, self.max_concurrent_chunks)
+        results = [None] * len(chunks)  # preserve order
+
         for i in range(0, len(chunks), max_concurrent):
             batch = chunks[i:i + max_concurrent]
             batch_tasks = []
-            
             for chunk_path in batch:
                 chunk_index = chunks.index(chunk_path)
                 task = self._transcribe_chunk_with_retry(job_id, chunk_path, chunk_index, len(chunks))
-                batch_tasks.append(task)
-            
-            # Process batch and collect results
-            batch_results = await asyncio.gather(*batch_tasks)
-            results.extend(batch_results)
-            
-            logger.info(f"Job {job_id}: Completed batch {i//max_concurrent + 1}/{(len(chunks) + max_concurrent - 1)//max_concurrent}")
-        
+                batch_tasks.append((chunk_index, chunk_path, task))
+
+            batch_transcripts = await asyncio.gather(*[t for _, _, t in batch_tasks])
+            for (chunk_index, chunk_path, _), transcript in zip(batch_tasks, batch_transcripts):
+                results[chunk_index] = transcript
+                # Free disk immediately after transcription; chunk no longer needed
+                self._cleanup_files([chunk_path])
+            logger.info(
+                f"Job {job_id}: Completed batch {i // max_concurrent + 1}/{(len(chunks) + max_concurrent - 1) // max_concurrent}"
+            )
         return results
     
     async def _transcribe_chunk_with_retry(

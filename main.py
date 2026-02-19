@@ -18,7 +18,7 @@ API_KEY = os.getenv("API_KEY", "your-secret-api-key")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 B2_KEY_ID = os.getenv("B2_KEY_ID")
 B2_APPLICATION_KEY = os.getenv("B2_APPLICATION_KEY")
-MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "3"))  # Limit concurrent job processing
+MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "1"))  # 1 = safe for 512MB / limited disk (e.g. Render free)
 
 job_manager = JobManager()
 worker = None

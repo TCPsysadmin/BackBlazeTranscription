@@ -377,6 +377,26 @@ curl https://your-service.com/health
 
 ---
 
+### Render free tier (512MB RAM / limited disk)
+
+**Symptom:** Jobs fail with out-of-memory, or temp storage exceeds 2GB.
+
+The service is optimized for low-memory and minimal temp storage:
+
+1. **Defaults:** `MAX_CONCURRENT_JOBS=1` and `CONCURRENT_CHUNKS=1` keep peak disk and RAM low.
+2. **Temp cleanup:** Original media is deleted as soon as audio is extracted; extracted audio is deleted after chunking; each chunk file is deleted immediately after it is transcribed.
+3. **ffmpeg required:** On free tier, ffmpeg must be installed. The pydub fallback loads entire files into RAM and will exceed 512MB on large files.
+
+**Recommended env (Render free):**
+```bash
+MAX_CONCURRENT_JOBS=1
+CONCURRENT_CHUNKS=1
+```
+
+**If you still hit limits:** Prefer shorter files or use a paid plan with more RAM/disk. Do not increase `CONCURRENT_CHUNKS` or `MAX_CONCURRENT_JOBS` on 512MB.
+
+---
+
 ## Large File Issues
 
 ### Out of Disk Space
@@ -385,6 +405,7 @@ curl https://your-service.com/health
 ```
 Job failed: No space left on device
 ```
+Temp storage exceeds available disk (e.g. Render ephemeral filesystem). The app now deletes media after extraction, extracted audio after chunking, and each chunk after transcription to minimize peak usage.
 
 **Cause:** Large files require significant temporary storage.
 
