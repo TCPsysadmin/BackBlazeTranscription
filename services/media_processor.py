@@ -285,13 +285,9 @@ class MediaProcessor:
         """
         os.makedirs(output_dir, exist_ok=True)
         segment_pattern = os.path.join(output_dir, "chunk_%03d.mp3")
-        # Pass the read-end fd directly via /dev/fd/N so ffmpeg inherits it.
-        # Using stdin=pipe_read_fd with asyncio.create_subprocess_exec does NOT reliably
-        # wire the fd to the subprocess's stdin (fd 0) — it causes ffmpeg to see immediate
-        # EOF and exit 234. Instead, reference the fd explicitly and let it be inherited.
         cmd = [
             "ffmpeg", "-y",
-            "-i", f"/dev/fd/{pipe_read_fd}",
+            "-i", "pipe:0",
             "-vn",
             "-acodec", "libmp3lame", "-q:a", "2",
             "-f", "segment",
@@ -301,13 +297,18 @@ class MediaProcessor:
             "-segment_list_type", "null",
             segment_pattern,
         ]
-        # close_fds=False so pipe_read_fd is inherited by the child process
+
+        # preexec_fn runs in the child after fork but before exec.
+        # dup2 wires pipe_read_fd to fd 0 (stdin) so ffmpeg's pipe:0 reads from it.
+        def _wire_stdin():
+            os.dup2(pipe_read_fd, 0)
+
         proc = await asyncio.create_subprocess_exec(
             *cmd,
-            stdin=asyncio.subprocess.DEVNULL,
+            stdin=asyncio.subprocess.DEVNULL,  # overridden by preexec_fn dup2
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
-            close_fds=False,
+            preexec_fn=_wire_stdin,
             cwd=output_dir,
         )
         return proc
