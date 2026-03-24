@@ -298,17 +298,15 @@ class MediaProcessor:
             segment_pattern,
         ]
 
-        # preexec_fn runs in the child after fork but before exec.
-        # dup2 wires pipe_read_fd to fd 0 (stdin) so ffmpeg's pipe:0 reads from it.
-        def _wire_stdin():
-            os.dup2(pipe_read_fd, 0)
-
+        # Pass the raw read-end fd as stdin. Python's subprocess will dup2 it to fd 0
+        # in the child, which is exactly what ffmpeg's pipe:0 reads from.
+        # We must make the fd inheritable first (Python 3.4+ sets O_CLOEXEC by default).
+        os.set_inheritable(pipe_read_fd, True)
         proc = await asyncio.create_subprocess_exec(
             *cmd,
-            stdin=asyncio.subprocess.DEVNULL,  # overridden by preexec_fn dup2
+            stdin=pipe_read_fd,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
-            preexec_fn=_wire_stdin,
             cwd=output_dir,
         )
         return proc
