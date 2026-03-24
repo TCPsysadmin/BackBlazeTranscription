@@ -19,6 +19,8 @@ logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
 CONCURRENT_CHUNKS_DEFAULT = int(os.getenv("CONCURRENT_CHUNKS", "1"))
 # Chunk duration in seconds; longer = fewer chunk files on disk (default 600 = 10 min)
 CHUNK_DURATION_SECONDS = int(os.getenv("CHUNK_DURATION_SECONDS", "600"))
+# B2 streaming download timeout in seconds (must cover full file transfer; default 7200 = 2 hours)
+B2_STREAM_TIMEOUT = float(os.getenv("B2_STREAM_TIMEOUT", "7200"))
 
 
 class TranscriptionWorker:
@@ -224,7 +226,7 @@ class TranscriptionWorker:
                         self.b2_client.download_to_stream(
                             job["b2_bucket"], job["b2_file_path"], stream
                         ),
-                        timeout=300.0  # 5 minute timeout for B2 download
+                        timeout=B2_STREAM_TIMEOUT
                     )
                 )
                 
@@ -252,7 +254,7 @@ class TranscriptionWorker:
                             await b2_task
                             logger.info(f"Job {job_id}: B2 download completed successfully")
                         except asyncio.TimeoutError:
-                            logger.error(f"Job {job_id}: B2 download timed out after 5 minutes")
+                            logger.error(f"Job {job_id}: B2 download timed out after {B2_STREAM_TIMEOUT}s")
                             if proc and proc.returncode is None:
                                 try:
                                     proc.terminate()
