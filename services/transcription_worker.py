@@ -298,7 +298,8 @@ class TranscriptionWorker:
                                 if proc.stderr:
                                     try:
                                         stderr_data = await asyncio.wait_for(proc.stderr.read(), timeout=1.0)
-                                        stderr = stderr_data.decode(errors="replace")[:1000]
+                                        decoded = stderr_data.decode(errors="replace")
+                                        stderr = decoded[-1000:]
                                     except Exception:
                                         pass
                                 logger.error(f"Job {job_id}: ffmpeg stderr: {stderr}")
@@ -341,7 +342,9 @@ class TranscriptionWorker:
                     if proc.stderr:
                         try:
                             stderr_data = await asyncio.wait_for(proc.stderr.read(), timeout=2.0)
-                            stderr = stderr_data.decode(errors="replace")[:2000]
+                            decoded = stderr_data.decode(errors="replace")
+                            # Take last 2000 chars; large ID3/XMP blobs would bury the actual error
+                            stderr = decoded[-2000:]
                         except Exception:
                             pass
                     logger.error(f"Job {job_id}: ffmpeg failed: exit {proc.returncode}, stderr: {stderr}")

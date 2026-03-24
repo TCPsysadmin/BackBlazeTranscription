@@ -294,7 +294,6 @@ class MediaProcessor:
             "-segment_time", str(segment_time_seconds),
             "-segment_format", "mp3",
             "-reset_timestamps", "1",
-            "-segment_list_type", "null",
             segment_pattern,
         ]
 
