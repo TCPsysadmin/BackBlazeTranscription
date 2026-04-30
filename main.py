@@ -205,6 +205,36 @@ class TranscribeResponse(BaseModel):
     )
 
 
+class QueuedJobInfo(BaseModel):
+    job_id: str = Field(
+        ...,
+        description="Unique identifier for the transcription job",
+        examples=["550e8400-e29b-41d4-a716-446655440000"]
+    )
+    b2_bucket: str = Field(
+        ...,
+        description="Backblaze B2 bucket name",
+        examples=["my-media-bucket"]
+    )
+    b2_file_path: str = Field(
+        ...,
+        description="Path to the media file within the B2 bucket",
+        examples=["recordings/2024/interview.mp4"]
+    )
+    status: str = Field(..., description="Current job status", examples=["queued"])
+    progress: int = Field(..., description="Job progress percentage (0-100)", examples=[0])
+    created_at: str = Field(
+        ...,
+        description="ISO-8601 UTC timestamp of when the job was created",
+        examples=["2026-04-30T12:34:56.789012"]
+    )
+
+
+class QueueResponse(BaseModel):
+    count: int = Field(..., description="Total number of jobs currently queued", examples=[2])
+    jobs: list[QueuedJobInfo] = Field(..., description="List of queued jobs in submission order")
+
+
 class JobStatusResponse(BaseModel):
     job_id: str = Field(
         ...,
@@ -412,6 +442,63 @@ async def create_transcription_job_http(
     )
     
     return TranscribeResponse(job_id=job_id, status="queued")
+
+
+@app.get(
+    "/queue",
+    response_model=QueueResponse,
+    tags=["Transcription"],
+    summary="List queued jobs",
+    description="""
+    Return all jobs currently in the `queued` state (waiting to be picked up by a worker).
+
+    Credentials (B2 key id / application key) and webhook callback URLs are intentionally
+    omitted from the response.
+    """,
+    responses={
+        200: {
+            "description": "Queued jobs retrieved successfully",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "count": 1,
+                        "jobs": [
+                            {
+                                "job_id": "550e8400-e29b-41d4-a716-446655440000",
+                                "b2_bucket": "my-media-bucket",
+                                "b2_file_path": "recordings/2024/interview.mp4",
+                                "status": "queued",
+                                "progress": 0,
+                                "created_at": "2026-04-30T12:34:56.789012",
+                            }
+                        ],
+                    }
+                }
+            },
+        },
+        401: {"description": "Invalid or missing API key"},
+    },
+)
+async def list_queued_jobs(
+    x_api_key: str = Header(..., alias="X-API-KEY", description="Your API key for authentication")
+):
+    """List all jobs currently in the queue."""
+    verify_api_key(x_api_key)
+
+    queued = job_manager.get_queued_jobs()
+    queued_sorted = sorted(queued, key=lambda j: j.get("created_at") or "")
+    jobs = [
+        QueuedJobInfo(
+            job_id=job["job_id"],
+            b2_bucket=job["b2_bucket"],
+            b2_file_path=job["b2_file_path"],
+            status=job["status"],
+            progress=job["progress"],
+            created_at=job["created_at"],
+        )
+        for job in queued_sorted
+    ]
+    return QueueResponse(count=len(jobs), jobs=jobs)
 
 
 @app.get(
