@@ -17,8 +17,8 @@ load_dotenv()
 # Configuration
 API_KEY = os.getenv("API_KEY", "your-secret-api-key")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-B2_KEY_ID = os.getenv("B2_KEY_ID")
-B2_APPLICATION_KEY = os.getenv("B2_APPLICATION_KEY")
+# B2 credentials are NOT loaded from env — they are supplied per-request in the API body
+# so the same backend can serve multiple B2 accounts.
 MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "1"))  # 1 = safe for 512MB / limited disk (e.g. Render free)
 # Comma-separated list of allowed origins for browser frontends. "*" allows all (no credentials).
 CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "*").split(",") if o.strip()]
@@ -32,10 +32,8 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
     global worker
     worker = TranscriptionWorker(
-        job_manager, 
-        OPENAI_API_KEY, 
-        B2_KEY_ID, 
-        B2_APPLICATION_KEY,
+        job_manager,
+        OPENAI_API_KEY,
         max_concurrent_jobs=MAX_CONCURRENT_JOBS
     )
     asyncio.create_task(worker.process_jobs())
@@ -139,6 +137,16 @@ class TranscribeRequest(BaseModel):
         description="Path to the media file within the B2 bucket",
         examples=["recordings/2024/interview.mp4"]
     )
+    b2_key_id: str = Field(
+        ...,
+        description="Backblaze B2 application key ID for accessing the bucket",
+        examples=["005abc1234567890000000001"]
+    )
+    b2_application_key: str = Field(
+        ...,
+        description="Backblaze B2 application key (secret) paired with b2_key_id",
+        examples=["K005abcdefghijklmnopqrstuvwxyz0123"]
+    )
     callback_url: HttpUrl = Field(
         ...,
         description="Webhook URL to receive job completion/failure notifications",
@@ -151,6 +159,16 @@ class TranscribeHTTPRequest(BaseModel):
         ...,
         description="Direct HTTPS URL to the media file (e.g., Backblaze B2 public URL)",
         examples=["https://f005.backblazeb2.com/file/TCPTRANSFER/folder/audio.mp3"]
+    )
+    b2_key_id: str = Field(
+        ...,
+        description="Backblaze B2 application key ID for accessing the bucket",
+        examples=["005abc1234567890000000001"]
+    )
+    b2_application_key: str = Field(
+        ...,
+        description="Backblaze B2 application key (secret) paired with b2_key_id",
+        examples=["K005abcdefghijklmnopqrstuvwxyz0123"]
     )
     callback_url: HttpUrl = Field(
         ...,
@@ -271,9 +289,11 @@ async def create_transcription_job(
         b2_bucket=request.b2_bucket,
         b2_file_path=request.b2_file_path,
         callback_url=str(request.callback_url),
+        b2_key_id=request.b2_key_id,
+        b2_application_key=request.b2_application_key,
         upload_transcript=x_upload_transcript
     )
-    
+
     return TranscribeResponse(job_id=job_id, status="queued")
 
 
@@ -373,6 +393,8 @@ async def create_transcription_job_http(
         b2_bucket=bucket_name,
         b2_file_path=file_path,
         callback_url=str(request.callback_url),
+        b2_key_id=request.b2_key_id,
+        b2_application_key=request.b2_application_key,
         upload_transcript=x_upload_transcript
     )
     

@@ -12,16 +12,26 @@ class JobManager:
         self.jobs: Dict[str, dict] = {}
         self.lock = Lock()
     
-    def create_job(self, b2_bucket: str, b2_file_path: str, callback_url: str, upload_transcript: bool = False) -> str:
+    def create_job(
+        self,
+        b2_bucket: str,
+        b2_file_path: str,
+        callback_url: str,
+        b2_key_id: str,
+        b2_application_key: str,
+        upload_transcript: bool = False,
+    ) -> str:
         """Create a new transcription job"""
         job_id = str(uuid.uuid4())
-        
+
         with self.lock:
             self.jobs[job_id] = {
                 "job_id": job_id,
                 "b2_bucket": b2_bucket,
                 "b2_file_path": b2_file_path,
                 "callback_url": callback_url,
+                "b2_key_id": b2_key_id,
+                "b2_application_key": b2_application_key,
                 "upload_transcript": upload_transcript,
                 "status": "queued",
                 "progress": 0,
@@ -31,7 +41,7 @@ class JobManager:
                 "chunks_total": 0,
                 "chunks_completed": 0
             }
-        
+
         return job_id
     
     def get_job(self, job_id: str) -> Optional[dict]:

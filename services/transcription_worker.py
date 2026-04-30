@@ -31,10 +31,10 @@ TEMP_WORK_SUBDIR = "transcription_work"
 class TranscriptionWorker:
     """Processes transcription jobs in the background (optimized for low memory/disk)"""
 
-    def __init__(self, job_manager, openai_api_key: str, b2_key_id: str, b2_app_key: str, max_concurrent_jobs: int = 1):
+    def __init__(self, job_manager, openai_api_key: str, max_concurrent_jobs: int = 1):
         self.job_manager = job_manager
         self.openai_client = OpenAITranscriber(openai_api_key)
-        self.b2_client = B2Client(b2_key_id, b2_app_key)
+        # B2 credentials are per-request; B2Client is built per-job inside process_job.
         self.webhook_client = WebhookClient()
         self.media_processor = MediaProcessor()
         self.running = True
@@ -128,9 +128,13 @@ class TranscriptionWorker:
         
         logger.info(f"Processing job {job_id}")
         self.job_manager.update_job(job_id, status="processing")
-        
+
         temp_files = []
-        
+
+        # Build a B2 client using the credentials supplied with this job.
+        # Credentials are per-request, so each job gets its own client.
+        b2_client = B2Client(job["b2_key_id"], job["b2_application_key"])
+
         try:
             # MP4/MOV etc. have metadata (moov) at end of file → ffmpeg can't parse from pipe.
             # Use incremental path (download then process) for those; stream only for pipe-friendly formats.
@@ -138,16 +142,16 @@ class TranscriptionWorker:
             STREAM_UNSAFE_EXTS = {".mp4", ".mov", ".m4a", ".avi", ".mkv", ".webm", ".3gp", ".3g2", ".mj2"}
             if ext in STREAM_UNSAFE_EXTS:
                 logger.info(f"Job {job_id}: Format {ext} is not pipe-streamable, using incremental path")
-                transcripts = await self._incremental_chunk_transcription(job_id, job)
+                transcripts = await self._incremental_chunk_transcription(job_id, job, b2_client)
             else:
                 try:
                     logger.info(f"Job {job_id}: Attempting streaming path (B2 → ffmpeg → segments)")
-                    transcripts = await self._stream_b2_to_transcription(job_id, job)
+                    transcripts = await self._stream_b2_to_transcription(job_id, job, b2_client)
                 except Exception as stream_error:
                     logger.warning(
                         f"Job {job_id}: Streaming failed ({stream_error}), falling back to incremental chunking"
                     )
-                    transcripts = await self._incremental_chunk_transcription(job_id, job)
+                    transcripts = await self._incremental_chunk_transcription(job_id, job, b2_client)
             
             # Merge transcripts
             logger.info(f"Job {job_id}: Merging transcripts")
@@ -158,7 +162,7 @@ class TranscriptionWorker:
             if job.get("upload_transcript", False):
                 try:
                     logger.info(f"Job {job_id}: Uploading transcript to B2")
-                    transcript_b2_path = await self._upload_transcript(job, full_transcript)
+                    transcript_b2_path = await self._upload_transcript(job, full_transcript, b2_client)
                     logger.info(f"Job {job_id}: Transcript uploaded to {transcript_b2_path}")
                 except Exception as upload_error:
                     logger.warning(f"Job {job_id}: Failed to upload transcript to B2: {upload_error}")
@@ -237,7 +241,7 @@ class TranscriptionWorker:
             # (orphaned chunks, segment dirs, transcript temp files, etc.)
             self._cleanup_job_files(job_id)
     
-    async def _stream_b2_to_transcription(self, job_id: str, job: dict) -> list[str]:
+    async def _stream_b2_to_transcription(self, job_id: str, job: dict, b2_client: B2Client) -> list[str]:
         """Stream B2 file through ffmpeg to segment files; transcribe each segment and delete.
         Never writes the full media file to disk, so stays under 2GB temp limit.
         """
@@ -265,7 +269,7 @@ class TranscriptionWorker:
                 )
                 b2_task = asyncio.create_task(
                     asyncio.wait_for(
-                        self.b2_client.download_to_stream(
+                        b2_client.download_to_stream(
                             job["b2_bucket"], job["b2_file_path"], stream
                         ),
                         timeout=B2_STREAM_TIMEOUT
@@ -459,17 +463,17 @@ class TranscriptionWorker:
             except Exception as ex:
                 logger.warning(f"Cleanup segment dir: {ex}")
     
-    async def _incremental_chunk_transcription(self, job_id: str, job: dict) -> list[str]:
+    async def _incremental_chunk_transcription(self, job_id: str, job: dict, b2_client: B2Client) -> list[str]:
         """Fallback: Download file, extract audio, then create chunks incrementally.
         Still better than creating all chunks at once, but writes full file to disk first.
         """
         logger.info(f"Job {job_id}: Using incremental chunking fallback")
         temp_files = []
-        
+
         try:
             # Download media
             logger.info(f"Job {job_id}: Downloading media from B2")
-            media_path = await self._download_media(job)
+            media_path = await self._download_media(job, b2_client)
             temp_files.append(media_path)
             
             # Extract audio
@@ -502,20 +506,20 @@ class TranscriptionWorker:
         finally:
             self._cleanup_files(temp_files)
     
-    async def _download_media(self, job: dict) -> str:
+    async def _download_media(self, job: dict, b2_client: B2Client) -> str:
         """Download media file from B2"""
         from services.b2_client import B2DownloadError
-        
+
         try:
             # Extract file extension from B2 file path
             file_extension = Path(job["b2_file_path"]).suffix
             if not file_extension:
                 file_extension = ".bin"  # Fallback for files without extension
-            
+
             # Preserve extension in local filename
             local_path = os.path.join(self.temp_dir, f"{job['job_id']}_media{file_extension}")
-            
-            await self.b2_client.download_file(
+
+            await b2_client.download_file(
                 job["b2_bucket"],
                 job["b2_file_path"],
                 local_path
@@ -688,10 +692,10 @@ class TranscriptionWorker:
         """Merge chunk transcripts in order"""
         return " ".join(transcripts)
     
-    async def _upload_transcript(self, job: dict, transcript: str) -> str:
+    async def _upload_transcript(self, job: dict, transcript: str, b2_client: B2Client) -> str:
         """Upload transcript as .txt file to B2 in the same directory as the original file"""
         from services.b2_client import B2UploadError
-        
+
         try:
             # Generate transcript filename based on original file path
             original_path = job["b2_file_path"]
@@ -707,7 +711,7 @@ class TranscriptionWorker:
                 f.write(transcript)
             
             # Upload to B2
-            await self.b2_client.upload_file(
+            await b2_client.upload_file(
                 job["b2_bucket"],
                 temp_transcript_path,
                 transcript_path

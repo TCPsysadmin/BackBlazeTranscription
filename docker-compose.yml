@@ -8,8 +8,6 @@ services:
     environment:
       - API_KEY=${API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - B2_KEY_ID=${B2_KEY_ID}
-      - B2_APPLICATION_KEY=${B2_APPLICATION_KEY}
       - TEMP_STORAGE_DIR=/data
     env_file:
       - .env
