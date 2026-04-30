@@ -9,8 +9,23 @@ from pydantic import BaseModel, HttpUrl, Field
 from dotenv import load_dotenv
 import uvicorn
 
+from urllib.parse import urlparse
+
 from services.job_manager import JobManager
 from services.transcription_worker import TranscriptionWorker
+
+
+def _resolve_callback_url(url) -> str | None:
+    """Return the callback URL as a string, or None if it should be skipped.
+    URLs on the RFC 2606 reserved `.invalid` TLD are sentinels meaning "no webhook".
+    """
+    if not url:
+        return None
+    s = str(url)
+    host = (urlparse(s).hostname or "").lower()
+    if host == "invalid" or host.endswith(".invalid"):
+        return None
+    return s
 
 
 load_dotenv()
@@ -147,9 +162,9 @@ class TranscribeRequest(BaseModel):
         description="Backblaze B2 application key (secret) paired with b2_key_id",
         examples=["K005abcdefghijklmnopqrstuvwxyz0123"]
     )
-    callback_url: HttpUrl = Field(
-        ...,
-        description="Webhook URL to receive job completion/failure notifications",
+    callback_url: HttpUrl | None = Field(
+        None,
+        description="Webhook URL to receive job completion/failure notifications (optional; omit to skip webhook)",
         examples=["https://your-app.com/webhooks/transcription"]
     )
 
@@ -170,9 +185,9 @@ class TranscribeHTTPRequest(BaseModel):
         description="Backblaze B2 application key (secret) paired with b2_key_id",
         examples=["K005abcdefghijklmnopqrstuvwxyz0123"]
     )
-    callback_url: HttpUrl = Field(
-        ...,
-        description="Webhook URL to receive job completion/failure notifications",
+    callback_url: HttpUrl | None = Field(
+        None,
+        description="Webhook URL to receive job completion/failure notifications (optional; omit to skip webhook)",
         examples=["https://your-app.com/webhooks/transcription"]
     )
 
@@ -270,25 +285,24 @@ async def create_transcription_job(
 ):
     """Submit a new transcription job"""
     verify_api_key(x_api_key)
-    
-    if not request.callback_url:
-        raise HTTPException(status_code=400, detail="callback_url is required")
-    
+
+    callback_url_str = _resolve_callback_url(request.callback_url)
+
     # Check for existing job (idempotency)
     existing_job = job_manager.find_existing_job(
         request.b2_bucket,
         request.b2_file_path,
-        str(request.callback_url)
+        callback_url_str
     )
-    
+
     if existing_job:
         return TranscribeResponse(job_id=existing_job["job_id"], status=existing_job["status"])
-    
+
     # Create new job with upload_transcript flag
     job_id = job_manager.create_job(
         b2_bucket=request.b2_bucket,
         b2_file_path=request.b2_file_path,
-        callback_url=str(request.callback_url),
+        callback_url=callback_url_str,
         b2_key_id=request.b2_key_id,
         b2_application_key=request.b2_application_key,
         upload_transcript=x_upload_transcript
@@ -353,10 +367,9 @@ async def create_transcription_job_http(
     from urllib.parse import urlparse, unquote
     
     verify_api_key(x_api_key)
-    
-    if not request.callback_url:
-        raise HTTPException(status_code=400, detail="callback_url is required")
-    
+
+    callback_url_str = _resolve_callback_url(request.callback_url)
+
     # Parse B2 URL to extract bucket and file path
     try:
         parsed = urlparse(str(request.media_url))
@@ -382,17 +395,17 @@ async def create_transcription_job_http(
     existing_job = job_manager.find_existing_job(
         bucket_name,
         file_path,
-        str(request.callback_url)
+        callback_url_str
     )
-    
+
     if existing_job:
         return TranscribeResponse(job_id=existing_job["job_id"], status=existing_job["status"])
-    
+
     # Create new job using extracted bucket and file path
     job_id = job_manager.create_job(
         b2_bucket=bucket_name,
         b2_file_path=file_path,
-        callback_url=str(request.callback_url),
+        callback_url=callback_url_str,
         b2_key_id=request.b2_key_id,
         b2_application_key=request.b2_application_key,
         upload_transcript=x_upload_transcript

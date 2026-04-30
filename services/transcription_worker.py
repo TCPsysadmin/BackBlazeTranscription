@@ -190,15 +190,17 @@ class TranscriptionWorker:
             if transcript_b2_path:
                 webhook_payload["transcript_b2_path"] = transcript_b2_path
             
-            webhook_success = await self.webhook_client.send_callback(
-                job["callback_url"],
-                webhook_payload
-            )
-            
-            if webhook_success:
-                logger.info(f"Job {job_id}: Completed successfully")
+            if job.get("callback_url"):
+                webhook_success = await self.webhook_client.send_callback(
+                    job["callback_url"],
+                    webhook_payload
+                )
+                if webhook_success:
+                    logger.info(f"Job {job_id}: Completed successfully")
+                else:
+                    logger.warning(f"Job {job_id}: Completed but webhook delivery failed")
             else:
-                logger.warning(f"Job {job_id}: Completed but webhook delivery failed")
+                logger.info(f"Job {job_id}: Completed successfully (no callback URL)")
             
         except Exception as e:
             logger.error(f"Job {job_id} failed: {e}", exc_info=True)
@@ -211,28 +213,29 @@ class TranscriptionWorker:
             )
             
             # Try to send failure webhook, but don't fail if it doesn't work
-            try:
-                webhook_success = await self.webhook_client.send_callback(
-                    job["callback_url"],
-                    {
-                        "job_id": job_id,
-                        "status": "failed",
-                        "b2_bucket": job["b2_bucket"],
-                        "b2_file_path": job["b2_file_path"],
-                        "error": error_msg
-                    }
-                )
-                
-                if not webhook_success:
-                    logger.warning(
-                        f"Job {job_id}: Failed and webhook delivery also failed. "
+            if job.get("callback_url"):
+                try:
+                    webhook_success = await self.webhook_client.send_callback(
+                        job["callback_url"],
+                        {
+                            "job_id": job_id,
+                            "status": "failed",
+                            "b2_bucket": job["b2_bucket"],
+                            "b2_file_path": job["b2_file_path"],
+                            "error": error_msg
+                        }
+                    )
+
+                    if not webhook_success:
+                        logger.warning(
+                            f"Job {job_id}: Failed and webhook delivery also failed. "
+                            f"Job status can be retrieved via API."
+                        )
+                except Exception as webhook_error:
+                    logger.error(
+                        f"Job {job_id}: Failed and webhook delivery raised exception: {webhook_error}. "
                         f"Job status can be retrieved via API."
                     )
-            except Exception as webhook_error:
-                logger.error(
-                    f"Job {job_id}: Failed and webhook delivery raised exception: {webhook_error}. "
-                    f"Job status can be retrieved via API."
-                )
         
         finally:
             # Cleanup any temp files (streaming path uses none; kept for consistency)
@@ -651,10 +654,11 @@ class TranscriptionWorker:
         """Transcribe a single chunk with retry logic"""
         max_retries = 3
         retry_count = 0
-        
+        time_offset = chunk_index * CHUNK_DURATION_SECONDS
+
         while retry_count < max_retries:
             try:
-                transcript = await self.openai_client.transcribe(chunk_path)
+                transcript = await self.openai_client.transcribe(chunk_path, time_offset=time_offset)
                 
                 # Update progress
                 chunks_completed = chunk_index + 1
@@ -690,7 +694,7 @@ class TranscriptionWorker:
     
     def _merge_transcripts(self, transcripts: list[str]) -> str:
         """Merge chunk transcripts in order"""
-        return " ".join(transcripts)
+        return "\n".join(t for t in transcripts if t)
     
     async def _upload_transcript(self, job: dict, transcript: str, b2_client: B2Client) -> str:
         """Upload transcript as .txt file to B2 in the same directory as the original file"""

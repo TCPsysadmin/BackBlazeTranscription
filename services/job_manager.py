@@ -16,7 +16,7 @@ class JobManager:
         self,
         b2_bucket: str,
         b2_file_path: str,
-        callback_url: str,
+        callback_url: Optional[str],
         b2_key_id: str,
         b2_application_key: str,
         upload_transcript: bool = False,
@@ -55,7 +55,7 @@ class JobManager:
             if job_id in self.jobs:
                 self.jobs[job_id].update(kwargs)
     
-    def find_existing_job(self, b2_bucket: str, b2_file_path: str, callback_url: str) -> Optional[dict]:
+    def find_existing_job(self, b2_bucket: str, b2_file_path: str, callback_url: Optional[str]) -> Optional[dict]:
         """Find existing queued or processing job with same parameters"""
         with self.lock:
             for job in self.jobs.values():
