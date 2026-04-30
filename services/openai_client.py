@@ -36,11 +36,16 @@ class OpenAITranscriber:
 
             segments = getattr(response, "segments", None) or []
             if segments:
-                lines = [
-                    f"[{_fmt_ts(seg.start + time_offset)}] {seg.text.strip()}"
-                    for seg in segments
-                    if seg.text.strip()
-                ]
+                lines = []
+                for seg in segments:
+                    if isinstance(seg, dict):
+                        start = seg.get("start", 0.0)
+                        text = (seg.get("text") or "").strip()
+                    else:
+                        start = getattr(seg, "start", 0.0)
+                        text = (getattr(seg, "text", "") or "").strip()
+                    if text:
+                        lines.append(f"[{_fmt_ts(start + time_offset)}] {text}")
                 result = "\n".join(lines)
             else:
                 # Fallback: no segments returned, prefix with chunk start time
