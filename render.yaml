@@ -5,6 +5,10 @@ services:
     plan: starter
     region: oregon
     healthCheckPath: /health
+    disk:
+      name: transcription-data
+      mountPath: /data
+      sizeGB: 10
     envVars:
       - key: API_KEY
         sync: false
@@ -14,3 +18,5 @@ services:
         sync: false
       - key: B2_APPLICATION_KEY
         sync: false
+      - key: TEMP_STORAGE_DIR
+        value: /data

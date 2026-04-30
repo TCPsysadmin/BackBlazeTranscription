@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -21,11 +22,15 @@ CONCURRENT_CHUNKS_DEFAULT = int(os.getenv("CONCURRENT_CHUNKS", "1"))
 CHUNK_DURATION_SECONDS = int(os.getenv("CHUNK_DURATION_SECONDS", "600"))
 # B2 streaming download timeout in seconds (must cover full file transfer; default 7200 = 2 hours)
 B2_STREAM_TIMEOUT = float(os.getenv("B2_STREAM_TIMEOUT", "7200"))
+# Base directory for all temp files (Render persistent SSD mount). Falls back to system temp if missing.
+TEMP_STORAGE_DIR = os.getenv("TEMP_STORAGE_DIR", "/data")
+# Subdirectory inside TEMP_STORAGE_DIR used for in-flight job files; cleared on boot.
+TEMP_WORK_SUBDIR = "transcription_work"
 
 
 class TranscriptionWorker:
     """Processes transcription jobs in the background (optimized for low memory/disk)"""
-    
+
     def __init__(self, job_manager, openai_api_key: str, b2_key_id: str, b2_app_key: str, max_concurrent_jobs: int = 1):
         self.job_manager = job_manager
         self.openai_client = OpenAITranscriber(openai_api_key)
@@ -33,11 +38,45 @@ class TranscriptionWorker:
         self.webhook_client = WebhookClient()
         self.media_processor = MediaProcessor()
         self.running = True
-        self.temp_dir = tempfile.mkdtemp()
+        self.temp_dir = self._init_temp_dir()
         self.max_concurrent_jobs = max_concurrent_jobs
         self.active_jobs = set()  # Track currently processing job IDs
         self.semaphore = asyncio.Semaphore(max_concurrent_jobs)  # Limit concurrent jobs
         self.max_concurrent_chunks = CONCURRENT_CHUNKS_DEFAULT
+
+    def _init_temp_dir(self) -> str:
+        """Resolve the temp working directory and clear any leftovers from a prior run.
+        Prefers the persistent disk at TEMP_STORAGE_DIR (Render SSD). Falls back to system
+        temp if the configured path is unavailable (e.g. local dev without the mount).
+        Clearing on boot prevents orphaned files from a crashed/restarted worker accumulating.
+        """
+        if TEMP_STORAGE_DIR and os.path.isdir(TEMP_STORAGE_DIR):
+            work_dir = os.path.join(TEMP_STORAGE_DIR, TEMP_WORK_SUBDIR)
+        else:
+            logger.warning(
+                f"TEMP_STORAGE_DIR '{TEMP_STORAGE_DIR}' not available, falling back to system temp"
+            )
+            work_dir = os.path.join(tempfile.gettempdir(), TEMP_WORK_SUBDIR)
+
+        if os.path.isdir(work_dir):
+            self._clear_directory(work_dir)
+            logger.info(f"Cleared leftover files in temp dir: {work_dir}")
+        os.makedirs(work_dir, exist_ok=True)
+        logger.info(f"Using temp dir: {work_dir}")
+        return work_dir
+
+    @staticmethod
+    def _clear_directory(path: str) -> None:
+        """Remove all contents of a directory (but not the directory itself)."""
+        for entry in os.listdir(path):
+            full = os.path.join(path, entry)
+            try:
+                if os.path.isdir(full) and not os.path.islink(full):
+                    shutil.rmtree(full, ignore_errors=True)
+                else:
+                    os.remove(full)
+            except Exception as e:
+                logger.warning(f"Failed to remove {full} during boot cleanup: {e}")
     
     def stop(self):
         """Stop the worker"""
@@ -194,6 +233,9 @@ class TranscriptionWorker:
         finally:
             # Cleanup any temp files (streaming path uses none; kept for consistency)
             self._cleanup_files(temp_files)
+            # Safety net: scrub anything left in temp_dir tied to this job
+            # (orphaned chunks, segment dirs, transcript temp files, etc.)
+            self._cleanup_job_files(job_id)
     
     async def _stream_b2_to_transcription(self, job_id: str, job: dict) -> list[str]:
         """Stream B2 file through ffmpeg to segment files; transcribe each segment and delete.
@@ -693,3 +735,25 @@ class TranscriptionWorker:
                     logger.debug(f"Deleted temp file: {path}")
             except Exception as e:
                 logger.warning(f"Failed to delete {path}: {e}")
+
+    def _cleanup_job_files(self, job_id: str):
+        """Remove any leftover files or directories in temp_dir tagged with this job_id.
+        Catches anything missed by per-step cleanup so the persistent disk doesn't fill up.
+        """
+        try:
+            if not os.path.isdir(self.temp_dir):
+                return
+            for entry in os.listdir(self.temp_dir):
+                if not entry.startswith(job_id):
+                    continue
+                full = os.path.join(self.temp_dir, entry)
+                try:
+                    if os.path.isdir(full) and not os.path.islink(full):
+                        shutil.rmtree(full, ignore_errors=True)
+                    else:
+                        os.remove(full)
+                    logger.debug(f"Cleaned up leftover for job {job_id}: {full}")
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup {full} for job {job_id}: {e}")
+        except Exception as e:
+            logger.warning(f"Job cleanup scan failed for {job_id}: {e}")

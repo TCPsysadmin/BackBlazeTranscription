@@ -3,6 +3,7 @@ import asyncio
 import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Header, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, HttpUrl, Field
 from dotenv import load_dotenv
@@ -19,6 +20,8 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 B2_KEY_ID = os.getenv("B2_KEY_ID")
 B2_APPLICATION_KEY = os.getenv("B2_APPLICATION_KEY")
 MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "1"))  # 1 = safe for 512MB / limited disk (e.g. Render free)
+# Comma-separated list of allowed origins for browser frontends. "*" allows all (no credentials).
+CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "*").split(",") if o.strip()]
 
 job_manager = JobManager()
 worker = None
@@ -111,6 +114,17 @@ app = FastAPI(
     lifespan=lifespan,
     docs_url=None,  # Disable default Swagger UI
     redoc_url=None,  # Disable ReDoc
+)
+
+# CORS for browser frontends. With allow_origins=["*"], allow_credentials must be False
+# (CORS spec). If you need cookies/auth credentials, set CORS_ORIGINS to specific domains.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 

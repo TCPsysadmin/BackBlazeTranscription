@@ -10,8 +10,12 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - B2_KEY_ID=${B2_KEY_ID}
       - B2_APPLICATION_KEY=${B2_APPLICATION_KEY}
+      - TEMP_STORAGE_DIR=/data
     env_file:
       - .env
     restart: unless-stopped
     volumes:
-      - /tmp/transcription:/tmp
+      - transcription-data:/data
+
+volumes:
+  transcription-data:
