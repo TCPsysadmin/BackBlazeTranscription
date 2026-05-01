@@ -134,6 +134,26 @@ class B2Client:
         
         await asyncio.get_event_loop().run_in_executor(None, _stream)
     
+    async def get_file_size(self, bucket_name: str, file_path: str) -> int:
+        """Return the size of a B2 file in bytes (for pre-flight disk checks)."""
+        def _get():
+            try:
+                api = self._get_api()
+                bucket = api.get_bucket_by_name(bucket_name)
+                # b2sdk's get_file_info_by_name returns a FileVersion with .size
+                info = bucket.get_file_info_by_name(file_path)
+                return int(info.size)
+            except NonExistentBucket:
+                raise B2DownloadError(f"bucket_not_found: {bucket_name}")
+            except FileNotPresent:
+                raise B2DownloadError(f"file_not_found: {file_path}")
+            except B2Error as e:
+                raise B2DownloadError(f"b2_error: {str(e)}")
+            except Exception as e:
+                raise B2DownloadError(f"download_error: {str(e)}")
+
+        return await asyncio.get_event_loop().run_in_executor(None, _get)
+
     async def upload_file(self, bucket_name: str, local_path: str, remote_path: str):
         """Upload a file from local path to B2"""
         def _upload():

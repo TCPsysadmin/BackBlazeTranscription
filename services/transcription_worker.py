@@ -22,6 +22,16 @@ CONCURRENT_CHUNKS_DEFAULT = int(os.getenv("CONCURRENT_CHUNKS", "1"))
 CHUNK_DURATION_SECONDS = int(os.getenv("CHUNK_DURATION_SECONDS", "600"))
 # B2 streaming download timeout in seconds (must cover full file transfer; default 7200 = 2 hours)
 B2_STREAM_TIMEOUT = float(os.getenv("B2_STREAM_TIMEOUT", "7200"))
+# B2 transcript upload timeout (transcripts are tiny, so a low ceiling is safe)
+B2_UPLOAD_TIMEOUT = float(os.getenv("B2_UPLOAD_TIMEOUT", "300"))
+# Master per-job timeout. Prevents one hung B2/network call from stalling the entire queue.
+JOB_TIMEOUT_SECONDS = float(os.getenv("JOB_TIMEOUT_SECONDS", "10800"))  # 3 hours
+# Minimum free bytes that must remain on temp disk after factoring in the source file size
+# plus expected overhead (extracted audio + 1 chunk). Prevents disk-full hangs.
+DISK_SAFETY_MARGIN_BYTES = int(os.getenv("DISK_SAFETY_MARGIN_BYTES", str(512 * 1024 * 1024)))  # 512 MB
+# Multiplier applied to source file size to estimate peak disk usage. 1.20 covers source
+# + extracted audio (audio is usually ≤15% of video) + 1 active chunk file.
+DISK_OVERHEAD_FACTOR = float(os.getenv("DISK_OVERHEAD_FACTOR", "1.20"))
 # Base directory for all temp files (Render persistent SSD mount). Falls back to system temp if missing.
 TEMP_STORAGE_DIR = os.getenv("TEMP_STORAGE_DIR", "/data")
 # Subdirectory inside TEMP_STORAGE_DIR used for in-flight job files; cleared on boot.
@@ -85,40 +95,65 @@ class TranscriptionWorker:
     async def process_jobs(self):
         """Main worker loop"""
         logger.info(f"Transcription worker started (max concurrent jobs: {self.max_concurrent_jobs})")
-        
+
         while self.running:
             try:
-                queued_jobs = self.job_manager.get_queued_jobs()
-                
-                for job in queued_jobs:
-                    job_id = job["job_id"]
-                    
-                    # Skip if already processing
-                    if job_id in self.active_jobs:
-                        continue
-                    
-                    # Try to acquire semaphore without blocking
-                    if self.semaphore.locked():
-                        logger.debug(f"Max concurrent jobs ({self.max_concurrent_jobs}) reached, waiting...")
-                        break  # Don't start more jobs this iteration
-                    
-                    # Mark as active and start processing
-                    self.active_jobs.add(job_id)
-                    asyncio.create_task(self._process_job_wrapper(job_id))
-                
+                # Only schedule new tasks when we have free slots. Gating on len(active_jobs)
+                # is correct; gating on semaphore.locked() is not, because asyncio.create_task
+                # below doesn't yield, so the semaphore stays unlocked until the new task body
+                # runs — letting the loop schedule every queued job at once.
+                free_slots = self.max_concurrent_jobs - len(self.active_jobs)
+                if free_slots > 0:
+                    queued_jobs = self.job_manager.get_queued_jobs()
+                    for job in queued_jobs:
+                        if free_slots <= 0:
+                            break
+                        job_id = job["job_id"]
+                        if job_id in self.active_jobs:
+                            continue
+                        self.active_jobs.add(job_id)
+                        asyncio.create_task(self._process_job_wrapper(job_id))
+                        free_slots -= 1
+
                 await asyncio.sleep(5)  # Check for new jobs every 5 seconds
             except Exception as e:
                 logger.error(f"Worker error: {e}")
                 await asyncio.sleep(5)
-    
+
     async def _process_job_wrapper(self, job_id: str):
-        """Wrapper to handle semaphore and cleanup"""
+        """Wrapper to handle semaphore, per-job timeout, and cleanup.
+
+        The timeout is critical: a hung b2sdk call (synchronous urllib3 in a thread) can
+        otherwise block forever and stall the entire queue, since the semaphore is held
+        for the duration of process_job.
+        """
         async with self.semaphore:
             try:
-                await self.process_job(job_id)
+                await asyncio.wait_for(self.process_job(job_id), timeout=JOB_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                logger.error(
+                    f"Job {job_id}: exceeded master timeout of {JOB_TIMEOUT_SECONDS}s; marking failed "
+                    f"so the queue can move on. (Underlying executor thread, if any, is leaked until "
+                    f"it exits on its own — Python threads can't be cancelled.)"
+                )
+                self.job_manager.update_job(
+                    job_id,
+                    status="failed",
+                    error=f"job_timeout: exceeded {int(JOB_TIMEOUT_SECONDS)}s",
+                )
+            except Exception as e:
+                logger.error(f"Job {job_id}: wrapper caught unexpected error: {e}", exc_info=True)
+                self.job_manager.update_job(
+                    job_id, status="failed", error=f"worker_error: {e}"
+                )
             finally:
-                # Remove from active jobs when done
+                # Remove from active jobs and scrub any leftover files for this job.
+                # Runs even on timeout, so /data won't fill up with orphaned chunks/audio.
                 self.active_jobs.discard(job_id)
+                try:
+                    self._cleanup_job_files(job_id)
+                except Exception as cleanup_error:
+                    logger.warning(f"Job {job_id}: post-timeout cleanup failed: {cleanup_error}")
     
     async def process_job(self, job_id: str):
         """Process a single transcription job"""
@@ -136,6 +171,11 @@ class TranscriptionWorker:
         b2_client = B2Client(job["b2_key_id"], job["b2_application_key"])
 
         try:
+            # Pre-flight disk check: bail before downloading if the file won't fit. Prevents
+            # the hang we saw on Render when disk hit 100%: ffmpeg/B2 block on ENOSPC and the
+            # job never completes. Fast and cheap — just one b2 metadata call.
+            await self._assert_disk_space_for_job(job_id, job, b2_client)
+
             # MP4/MOV etc. have metadata (moov) at end of file → ffmpeg can't parse from pipe.
             # Use incremental path (download then process) for those; stream only for pipe-friendly formats.
             ext = Path(job["b2_file_path"]).suffix.lower()
@@ -162,8 +202,19 @@ class TranscriptionWorker:
             if job.get("upload_transcript", False):
                 try:
                     logger.info(f"Job {job_id}: Uploading transcript to B2")
-                    transcript_b2_path = await self._upload_transcript(job, full_transcript, b2_client)
+                    # Wrap with timeout: b2sdk uses synchronous urllib3 in a thread, and a
+                    # silently-dropped TCP connection can otherwise hang for ~2h (Linux TCP
+                    # keepalive default). Without this the entire queue stalls on one upload.
+                    transcript_b2_path = await asyncio.wait_for(
+                        self._upload_transcript(job, full_transcript, b2_client),
+                        timeout=B2_UPLOAD_TIMEOUT,
+                    )
                     logger.info(f"Job {job_id}: Transcript uploaded to {transcript_b2_path}")
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"Job {job_id}: Transcript upload exceeded {B2_UPLOAD_TIMEOUT}s; "
+                        f"continuing without B2 upload (job result still returned via webhook/polling)"
+                    )
                 except Exception as upload_error:
                     logger.warning(f"Job {job_id}: Failed to upload transcript to B2: {upload_error}")
                     # Don't fail the job if upload fails, just log it
@@ -244,6 +295,41 @@ class TranscriptionWorker:
             # (orphaned chunks, segment dirs, transcript temp files, etc.)
             self._cleanup_job_files(job_id)
     
+    async def _assert_disk_space_for_job(self, job_id: str, job: dict, b2_client: B2Client) -> None:
+        """Raise if the temp disk doesn't have headroom to process this file.
+
+        Fetches the file size from B2 metadata (cheap), then compares
+        size * DISK_OVERHEAD_FACTOR + DISK_SAFETY_MARGIN against the free space on
+        self.temp_dir's filesystem. Failing here marks the job 'failed' with a clear
+        error instead of letting it hang on a full disk.
+        """
+        try:
+            file_size = await b2_client.get_file_size(job["b2_bucket"], job["b2_file_path"])
+        except Exception as e:
+            # If metadata lookup fails, surface it cleanly instead of falling through to
+            # the download (which would also fail, but with less context).
+            raise Exception(f"file_size_lookup_failed: {e}")
+
+        try:
+            free_bytes = shutil.disk_usage(self.temp_dir).free
+        except Exception as e:
+            logger.warning(f"Job {job_id}: disk_usage check failed ({e}); skipping pre-flight check")
+            return
+
+        needed = int(file_size * DISK_OVERHEAD_FACTOR) + DISK_SAFETY_MARGIN_BYTES
+        if needed > free_bytes:
+            mb = lambda b: b // (1024 * 1024)
+            raise Exception(
+                f"insufficient_disk_space: file is {mb(file_size)}MB, "
+                f"need ~{mb(needed)}MB free, only {mb(free_bytes)}MB available on {self.temp_dir}. "
+                f"Increase TEMP_STORAGE_DIR capacity or wait for in-flight jobs to clear."
+            )
+        logger.info(
+            f"Job {job_id}: disk pre-flight OK "
+            f"(file={file_size // (1024 * 1024)}MB, need={needed // (1024 * 1024)}MB, "
+            f"free={free_bytes // (1024 * 1024)}MB)"
+        )
+
     async def _stream_b2_to_transcription(self, job_id: str, job: dict, b2_client: B2Client) -> list[str]:
         """Stream B2 file through ffmpeg to segment files; transcribe each segment and delete.
         Never writes the full media file to disk, so stays under 2GB temp limit.
@@ -476,7 +562,13 @@ class TranscriptionWorker:
         try:
             # Download media
             logger.info(f"Job {job_id}: Downloading media from B2")
-            media_path = await self._download_media(job, b2_client)
+            # Outer timeout: same rationale as transcript upload — b2sdk's synchronous urllib3
+            # call has no aggressive read timeout, so a silently-dropped TCP socket can hang
+            # for hours. Bail early so the master per-job timeout doesn't have to.
+            media_path = await asyncio.wait_for(
+                self._download_media(job, b2_client),
+                timeout=B2_STREAM_TIMEOUT,
+            )
             temp_files.append(media_path)
             
             # Extract audio
@@ -597,13 +689,18 @@ class TranscriptionWorker:
         Returns the transcript text.
         """
         chunk_path = None
+        # Put per-job chunks in their own subdirectory so _cleanup_job_files (which
+        # matches anything starting with job_id) catches any leftovers if the job
+        # is killed mid-flight. Otherwise generic chunk_N.mp3 files would survive.
+        chunks_dir = os.path.join(self.temp_dir, f"{job_id}_chunks")
         try:
+            os.makedirs(chunks_dir, exist_ok=True)
             # Create chunk on-demand
             chunk_path = await self.media_processor.create_single_chunk(
                 audio_path,
                 chunk_index,
                 CHUNK_DURATION_SECONDS,
-                self.temp_dir
+                chunks_dir
             )
             
             if chunk_path is None:

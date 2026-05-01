@@ -1,6 +1,7 @@
 """Media Transcription Service - Main API"""
 import asyncio
 import os
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Header, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -46,6 +47,15 @@ worker = None
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
     global worker
+    # Replace the default ThreadPoolExecutor (which is min(32, cpu_count()+4) — only 5
+    # threads on a 1-CPU container) with a larger pool. b2sdk runs synchronously inside
+    # run_in_executor, so a single hung TCP read pins one thread until the OS notices
+    # the dead socket (can be ~2h). With 53 queued jobs we need headroom so a few leaked
+    # threads don't exhaust the pool and starve subsequent jobs.
+    asyncio.get_event_loop().set_default_executor(
+        ThreadPoolExecutor(max_workers=32, thread_name_prefix="b2-io")
+    )
+
     worker = TranscriptionWorker(
         job_manager,
         OPENAI_API_KEY,
