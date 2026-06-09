@@ -1,9 +1,12 @@
 """Media Transcription Service - Main API"""
 import asyncio
 import os
+import shutil
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Header, BackgroundTasks
+from pathlib import Path
+from fastapi import FastAPI, HTTPException, Header, BackgroundTasks, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, HttpUrl, Field
@@ -271,6 +274,16 @@ class JobStatusResponse(BaseModel):
         description="Full transcript text (only available when status is completed)",
         examples=["This is the transcribed text from the audio file."]
     )
+    drive_transcript_file_id: str | None = Field(
+        None,
+        description="Google Drive file ID of the uploaded transcript (if Drive upload was requested)",
+        examples=["1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"]
+    )
+    drive_transcript_url: str | None = Field(
+        None,
+        description="Google Drive web view URL of the uploaded transcript",
+        examples=["https://drive.google.com/file/d/1Bxi.../view"]
+    )
 
 
 def verify_api_key(x_api_key: str = Header(...)):
@@ -340,12 +353,13 @@ async def create_transcription_job(
 
     # Create new job with upload_transcript flag
     job_id = job_manager.create_job(
+        callback_url=callback_url_str,
         b2_bucket=request.b2_bucket,
         b2_file_path=request.b2_file_path,
-        callback_url=callback_url_str,
         b2_key_id=request.b2_key_id,
         b2_application_key=request.b2_application_key,
-        upload_transcript=x_upload_transcript
+        upload_transcript=x_upload_transcript,
+        source_type="b2",
     )
 
     return TranscribeResponse(job_id=job_id, status="queued")
@@ -443,14 +457,97 @@ async def create_transcription_job_http(
 
     # Create new job using extracted bucket and file path
     job_id = job_manager.create_job(
+        callback_url=callback_url_str,
         b2_bucket=bucket_name,
         b2_file_path=file_path,
-        callback_url=callback_url_str,
         b2_key_id=request.b2_key_id,
         b2_application_key=request.b2_application_key,
-        upload_transcript=x_upload_transcript
+        upload_transcript=x_upload_transcript,
+        source_type="b2",
     )
-    
+
+    return TranscribeResponse(job_id=job_id, status="queued")
+
+
+# Supported video/audio extensions for direct upload
+_SUPPORTED_EXTENSIONS = {
+    ".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac",
+    ".mp4", ".mov", ".avi", ".mkv", ".webm",
+}
+
+TEMP_STORAGE_DIR = os.getenv("TEMP_STORAGE_DIR", "/data")
+
+
+@app.post(
+    "/transcribe-file",
+    response_model=TranscribeResponse,
+    tags=["Transcription"],
+    summary="Upload and transcribe a media file directly",
+    description="""
+    Upload a video or audio file directly for transcription — no Backblaze B2 required.
+
+    The file is saved temporarily on the server, transcribed with OpenAI Whisper, and
+    optionally written to a Google Drive folder when done. All existing B2-based endpoints
+    remain fully functional alongside this one.
+
+    **Supported formats:** mp3, wav, m4a, flac, ogg, aac, mp4, mov, avi, mkv, webm
+
+    **Form fields:**
+    - `file` — the media file (multipart/form-data)
+    - `callback_url` *(optional)* — webhook URL for completion notification
+    - `google_drive_folder_id` *(optional)* — Drive folder ID to save `<name>_transcript.txt`
+
+    **Google Drive setup:** set `GOOGLE_SERVICE_ACCOUNT_JSON` or `GOOGLE_SERVICE_ACCOUNT_FILE`
+    on the server and share the target folder with the service account email.
+    """,
+)
+async def transcribe_uploaded_file(
+    file: UploadFile = File(..., description="Video or audio file to transcribe"),
+    callback_url: str | None = Form(None, description="Webhook URL for completion notification"),
+    google_drive_folder_id: str | None = Form(None, description="Google Drive folder ID to save transcript"),
+    x_api_key: str = Header(..., alias="X-API-KEY", description="Your API key for authentication"),
+):
+    """Upload a media file and queue it for transcription."""
+    verify_api_key(x_api_key)
+
+    filename = file.filename or "upload"
+    ext = Path(filename).suffix.lower()
+    if ext not in _SUPPORTED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{ext}'. Supported: {', '.join(sorted(_SUPPORTED_EXTENSIONS))}",
+        )
+
+    callback_url_str = _resolve_callback_url(callback_url)
+
+    # Generate the job ID here so the uploaded file can share the same UUID prefix.
+    # The worker's cleanup system matches files by job_id prefix, so this keeps
+    # the uploaded file inside that scope and prevents orphaned files on disk.
+    job_id = str(uuid.uuid4())
+    work_dir = os.path.join(
+        TEMP_STORAGE_DIR if os.path.isdir(TEMP_STORAGE_DIR) else os.path.join(os.getcwd(), "tmp"),
+        "transcription_work",
+    )
+    os.makedirs(work_dir, exist_ok=True)
+    local_path = os.path.join(work_dir, f"{job_id}_upload{ext}")
+
+    try:
+        with open(local_path, "wb") as dst:
+            shutil.copyfileobj(file.file, dst)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {e}")
+    finally:
+        await file.close()
+
+    job_manager.create_job(
+        job_id=job_id,
+        callback_url=callback_url_str,
+        source_type="local_file",
+        local_file_path=local_path,
+        original_filename=filename,
+        google_drive_folder_id=google_drive_folder_id or None,
+    )
+
     return TranscribeResponse(job_id=job_id, status="queued")
 
 
@@ -588,7 +685,9 @@ async def get_job_status(
         status=job["status"],
         progress=job["progress"],
         error=job.get("error"),
-        transcript=job.get("transcript")
+        transcript=job.get("transcript"),
+        drive_transcript_file_id=job.get("drive_transcript_file_id"),
+        drive_transcript_url=job.get("drive_transcript_url"),
     )
 
 

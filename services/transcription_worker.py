@@ -47,6 +47,7 @@ class TranscriptionWorker:
         # B2 credentials are per-request; B2Client is built per-job inside process_job.
         self.webhook_client = WebhookClient()
         self.media_processor = MediaProcessor()
+        self.n8n_drive_url = os.getenv("N8N_DRIVE_WEBHOOK_URL", "")
         self.running = True
         self.temp_dir = self._init_temp_dir()
         self.max_concurrent_jobs = max_concurrent_jobs
@@ -160,91 +161,101 @@ class TranscriptionWorker:
         job = self.job_manager.get_job(job_id)
         if not job or job["status"] != "queued":
             return
-        
-        logger.info(f"Processing job {job_id}")
+
+        logger.info(f"Processing job {job_id} (source_type={job.get('source_type', 'b2')})")
         self.job_manager.update_job(job_id, status="processing")
 
         temp_files = []
 
-        # Build a B2 client using the credentials supplied with this job.
-        # Credentials are per-request, so each job gets its own client.
-        b2_client = B2Client(job["b2_key_id"], job["b2_application_key"])
-
         try:
-            # Pre-flight disk check: bail before downloading if the file won't fit. Prevents
-            # the hang we saw on Render when disk hit 100%: ffmpeg/B2 block on ENOSPC and the
-            # job never completes. Fast and cheap — just one b2 metadata call.
-            await self._assert_disk_space_for_job(job_id, job, b2_client)
-
-            # MP4/MOV etc. have metadata (moov) at end of file → ffmpeg can't parse from pipe.
-            # Use incremental path (download then process) for those; stream only for pipe-friendly formats.
-            ext = Path(job["b2_file_path"]).suffix.lower()
-            STREAM_UNSAFE_EXTS = {".mp4", ".mov", ".m4a", ".avi", ".mkv", ".webm", ".3gp", ".3g2", ".mj2"}
-            if ext in STREAM_UNSAFE_EXTS:
-                logger.info(f"Job {job_id}: Format {ext} is not pipe-streamable, using incremental path")
-                transcripts = await self._incremental_chunk_transcription(job_id, job, b2_client)
+            if job.get("source_type") == "local_file":
+                transcripts = await self._process_local_file(job_id, job)
             else:
-                try:
-                    logger.info(f"Job {job_id}: Attempting streaming path (B2 → ffmpeg → segments)")
-                    transcripts = await self._stream_b2_to_transcription(job_id, job, b2_client)
-                except Exception as stream_error:
-                    logger.warning(
-                        f"Job {job_id}: Streaming failed ({stream_error}), falling back to incremental chunking"
-                    )
+                # Build a B2 client using the credentials supplied with this job.
+                b2_client = B2Client(job["b2_key_id"], job["b2_application_key"])
+
+                # Pre-flight disk check: bail before downloading if the file won't fit.
+                await self._assert_disk_space_for_job(job_id, job, b2_client)
+
+                # MP4/MOV etc. have metadata (moov) at end of file → can't parse from pipe.
+                ext = Path(job["b2_file_path"]).suffix.lower()
+                STREAM_UNSAFE_EXTS = {".mp4", ".mov", ".m4a", ".avi", ".mkv", ".webm", ".3gp", ".3g2", ".mj2"}
+                if ext in STREAM_UNSAFE_EXTS:
+                    logger.info(f"Job {job_id}: Format {ext} is not pipe-streamable, using incremental path")
                     transcripts = await self._incremental_chunk_transcription(job_id, job, b2_client)
-            
+                else:
+                    try:
+                        logger.info(f"Job {job_id}: Attempting streaming path (B2 → ffmpeg → segments)")
+                        transcripts = await self._stream_b2_to_transcription(job_id, job, b2_client)
+                    except Exception as stream_error:
+                        logger.warning(
+                            f"Job {job_id}: Streaming failed ({stream_error}), falling back to incremental chunking"
+                        )
+                        transcripts = await self._incremental_chunk_transcription(job_id, job, b2_client)
+
             # Merge transcripts
             logger.info(f"Job {job_id}: Merging transcripts")
             full_transcript = self._merge_transcripts(transcripts)
-            
-            # Upload transcript to B2 (if requested)
+
+            # --- Output: B2 upload (existing behaviour, only for B2-source jobs) ---
             transcript_b2_path = None
-            if job.get("upload_transcript", False):
+            if job.get("upload_transcript", False) and job.get("source_type") != "local_file":
                 try:
                     logger.info(f"Job {job_id}: Uploading transcript to B2")
-                    # Wrap with timeout: b2sdk uses synchronous urllib3 in a thread, and a
-                    # silently-dropped TCP connection can otherwise hang for ~2h (Linux TCP
-                    # keepalive default). Without this the entire queue stalls on one upload.
                     transcript_b2_path = await asyncio.wait_for(
                         self._upload_transcript(job, full_transcript, b2_client),
                         timeout=B2_UPLOAD_TIMEOUT,
                     )
-                    logger.info(f"Job {job_id}: Transcript uploaded to {transcript_b2_path}")
+                    logger.info(f"Job {job_id}: Transcript uploaded to B2: {transcript_b2_path}")
                 except asyncio.TimeoutError:
                     logger.warning(
-                        f"Job {job_id}: Transcript upload exceeded {B2_UPLOAD_TIMEOUT}s; "
-                        f"continuing without B2 upload (job result still returned via webhook/polling)"
+                        f"Job {job_id}: B2 transcript upload timed out after {B2_UPLOAD_TIMEOUT}s; skipping"
                     )
                 except Exception as upload_error:
                     logger.warning(f"Job {job_id}: Failed to upload transcript to B2: {upload_error}")
-                    # Don't fail the job if upload fails, just log it
-            else:
-                logger.info(f"Job {job_id}: Skipping transcript upload (not requested)")
-            
-            # Update job and send callback
+
+            # --- Output: Google Drive upload ---
+            drive_file = None
+            if job.get("google_drive_folder_id"):
+                try:
+                    logger.info(f"Job {job_id}: Uploading transcript to Google Drive")
+                    drive_file = await self._upload_transcript_to_drive(job, full_transcript)
+                    self.job_manager.update_job(
+                        job_id,
+                        drive_transcript_file_id=drive_file.get("id"),
+                        drive_transcript_url=drive_file.get("webViewLink"),
+                    )
+                    logger.info(f"Job {job_id}: Transcript uploaded to Drive: {drive_file.get('webViewLink')}")
+                except Exception as drive_error:
+                    logger.warning(f"Job {job_id}: Failed to upload transcript to Drive: {drive_error}")
+
+            # Update job state
             self.job_manager.update_job(
                 job_id,
                 status="completed",
                 progress=100,
-                transcript=full_transcript
+                transcript=full_transcript,
             )
-            
+
             webhook_payload = {
                 "job_id": job_id,
                 "status": "completed",
-                "b2_bucket": job["b2_bucket"],
-                "b2_file_path": job["b2_file_path"],
-                "transcript": full_transcript
+                "transcript": full_transcript,
             }
-            
-            # Add transcript B2 path if upload succeeded
+            if job.get("source_type") != "local_file":
+                webhook_payload["b2_bucket"] = job["b2_bucket"]
+                webhook_payload["b2_file_path"] = job["b2_file_path"]
+            else:
+                webhook_payload["original_filename"] = job.get("original_filename")
             if transcript_b2_path:
                 webhook_payload["transcript_b2_path"] = transcript_b2_path
-            
+            if drive_file:
+                webhook_payload["drive_transcript_file_id"] = drive_file.get("id")
+                webhook_payload["drive_transcript_url"] = drive_file.get("webViewLink")
+
             if job.get("callback_url"):
                 webhook_success = await self.webhook_client.send_callback(
-                    job["callback_url"],
-                    webhook_payload
+                    job["callback_url"], webhook_payload
                 )
                 if webhook_success:
                     logger.info(f"Job {job_id}: Completed successfully")
@@ -252,48 +263,96 @@ class TranscriptionWorker:
                     logger.warning(f"Job {job_id}: Completed but webhook delivery failed")
             else:
                 logger.info(f"Job {job_id}: Completed successfully (no callback URL)")
-            
+
         except Exception as e:
             logger.error(f"Job {job_id} failed: {e}", exc_info=True)
             error_msg = str(e)
-            
-            self.job_manager.update_job(
-                job_id,
-                status="failed",
-                error=error_msg
-            )
-            
-            # Try to send failure webhook, but don't fail if it doesn't work
+
+            self.job_manager.update_job(job_id, status="failed", error=error_msg)
+
             if job.get("callback_url"):
                 try:
+                    failure_payload = {"job_id": job_id, "status": "failed", "error": error_msg}
+                    if job.get("source_type") != "local_file":
+                        failure_payload["b2_bucket"] = job["b2_bucket"]
+                        failure_payload["b2_file_path"] = job["b2_file_path"]
+                    else:
+                        failure_payload["original_filename"] = job.get("original_filename")
                     webhook_success = await self.webhook_client.send_callback(
-                        job["callback_url"],
-                        {
-                            "job_id": job_id,
-                            "status": "failed",
-                            "b2_bucket": job["b2_bucket"],
-                            "b2_file_path": job["b2_file_path"],
-                            "error": error_msg
-                        }
+                        job["callback_url"], failure_payload
                     )
-
                     if not webhook_success:
-                        logger.warning(
-                            f"Job {job_id}: Failed and webhook delivery also failed. "
-                            f"Job status can be retrieved via API."
-                        )
+                        logger.warning(f"Job {job_id}: Failed and webhook delivery also failed.")
                 except Exception as webhook_error:
-                    logger.error(
-                        f"Job {job_id}: Failed and webhook delivery raised exception: {webhook_error}. "
-                        f"Job status can be retrieved via API."
-                    )
-        
+                    logger.error(f"Job {job_id}: Webhook delivery raised exception: {webhook_error}")
+
         finally:
-            # Cleanup any temp files (streaming path uses none; kept for consistency)
             self._cleanup_files(temp_files)
-            # Safety net: scrub anything left in temp_dir tied to this job
-            # (orphaned chunks, segment dirs, transcript temp files, etc.)
             self._cleanup_job_files(job_id)
+
+    async def _process_local_file(self, job_id: str, job: dict) -> list[str]:
+        """Process a file already on disk (uploaded via /transcribe-file).
+        Skips B2 download entirely; runs audio extraction → chunking → transcription.
+        """
+        local_path = job.get("local_file_path")
+        if not local_path or not os.path.exists(local_path):
+            raise Exception(f"local_file_not_found: {local_path}")
+
+        temp_files = []
+        try:
+            logger.info(f"Job {job_id}: Extracting audio from local file: {local_path}")
+            audio_path = await self._extract_audio(local_path)
+            if audio_path != local_path:
+                temp_files.append(audio_path)
+
+            logger.info(f"Job {job_id}: Getting chunk info")
+            duration_seconds, num_chunks = await self.media_processor.get_chunk_info(
+                audio_path, chunk_duration=CHUNK_DURATION_SECONDS
+            )
+            self.job_manager.update_job(job_id, chunks_total=num_chunks)
+
+            logger.info(f"Job {job_id}: Transcribing {num_chunks} chunks")
+            transcripts = await self._transcribe_chunks_incremental(
+                job_id, audio_path, num_chunks, duration_seconds
+            )
+
+            return transcripts
+        finally:
+            self._cleanup_files(temp_files)
+
+    async def _upload_transcript_to_drive(self, job: dict, transcript: str) -> dict:
+        """Upload transcript text to Google Drive via the n8n proxy webhook.
+
+        The n8n workflow handles the actual Drive upload using its stored OAuth
+        credential, so no service account key is needed on this server.
+        Returns a dict with keys: ok, drive_file_id, drive_file_url.
+        """
+        import httpx
+
+        if not self.n8n_drive_url:
+            raise Exception("N8N_DRIVE_WEBHOOK_URL is not set — cannot upload to Drive")
+
+        original_filename = job.get("original_filename") or job.get("b2_file_path") or "transcript"
+        base_name = Path(original_filename).stem
+        drive_filename = f"{base_name}_transcript.txt"
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                self.n8n_drive_url,
+                json={
+                    "filename": drive_filename,
+                    "content": transcript,
+                    "folder_id": job["google_drive_folder_id"],
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        # Normalise to the shape the rest of the worker expects
+        return {
+            "id": data.get("drive_file_id"),
+            "webViewLink": data.get("drive_file_url"),
+        }
     
     async def _assert_disk_space_for_job(self, job_id: str, job: dict, b2_client: B2Client) -> None:
         """Raise if the temp disk doesn't have headroom to process this file.
