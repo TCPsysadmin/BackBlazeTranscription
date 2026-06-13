@@ -6,7 +6,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Header, BackgroundTasks, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Header, BackgroundTasks, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, HttpUrl, Field
@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 
 from services.job_manager import JobManager
 from services.transcription_worker import TranscriptionWorker
+from services.upload_manager import UploadManager, UploadError
 
 
 def _resolve_callback_url(url) -> str | None:
@@ -58,6 +59,18 @@ async def lifespan(app: FastAPI):
     asyncio.get_event_loop().set_default_executor(
         ThreadPoolExecutor(max_workers=32, thread_name_prefix="b2-io")
     )
+
+    # Clear orphaned resumable-upload .part files from a previous run. Upload sessions
+    # are in-memory, so any leftover file on disk is unreachable and just wastes space.
+    try:
+        up_dir = _uploads_dir()
+        for _name in os.listdir(up_dir):
+            try:
+                os.remove(os.path.join(up_dir, _name))
+            except Exception:
+                pass
+    except Exception:
+        pass
 
     worker = TranscriptionWorker(
         job_manager,
@@ -478,6 +491,32 @@ _SUPPORTED_EXTENSIONS = {
 TEMP_STORAGE_DIR = os.getenv("TEMP_STORAGE_DIR", "/data")
 
 
+def _work_base_dir() -> str:
+    """Base dir for transcription files — the persistent disk if mounted, else a
+    local ./tmp fallback (e.g. local dev without the Render SSD mount)."""
+    return TEMP_STORAGE_DIR if os.path.isdir(TEMP_STORAGE_DIR) else os.path.join(os.getcwd(), "tmp")
+
+
+def _transcription_work_dir() -> str:
+    """Where the worker expects in-flight job files (matches /transcribe-file)."""
+    d = os.path.join(_work_base_dir(), "transcription_work")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _uploads_dir() -> str:
+    """Where resumable-upload .part files are assembled before hand-off."""
+    d = os.path.join(_work_base_dir(), "transcription_uploads")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+# Resumable chunked-upload sessions (in-memory, like JobManager). Lets browsers send
+# large files in retryable slices instead of one giant POST. Orphaned .part files are
+# cleared on boot by the lifespan handler above.
+upload_manager = UploadManager(_uploads_dir())
+
+
 @app.post(
     "/transcribe-file",
     response_model=TranscribeResponse,
@@ -549,6 +588,180 @@ async def transcribe_uploaded_file(
     )
 
     return TranscribeResponse(job_id=job_id, status="queued")
+
+
+# ---------------------------------------------------------------------------
+# Resumable chunked upload (additive; existing /transcribe-file is untouched)
+# ---------------------------------------------------------------------------
+
+class UploadInitRequest(BaseModel):
+    filename: str = Field(..., description="Original file name (used for extension + transcript naming)", examples=["interview.mp4"])
+    total_size: int | None = Field(None, description="Total file size in bytes (enables completeness validation)", examples=[5368709120])
+
+
+class UploadSessionResponse(BaseModel):
+    upload_id: str = Field(..., description="Identifier for this resumable upload session")
+    received_bytes: int = Field(..., description="Bytes received and persisted so far")
+    total_size: int | None = Field(None, description="Total size if it was provided at init")
+
+
+class UploadCompleteRequest(BaseModel):
+    callback_url: HttpUrl | None = Field(None, description="Optional webhook for completion notification")
+    google_drive_folder_id: str | None = Field(None, description="Optional Drive folder id for the backend to save the transcript")
+
+
+@app.post(
+    "/uploads/init",
+    response_model=UploadSessionResponse,
+    tags=["Transcription"],
+    summary="Start a resumable upload",
+    description="""
+    Begin a resumable, chunked upload of a media file. Returns an `upload_id`; send the
+    file in slices via `POST /uploads/{upload_id}/chunk`, then finalize with
+    `POST /uploads/{upload_id}/complete` to queue the transcription job.
+
+    This is an alternative to the single-shot `/transcribe-file` for large files where a
+    single long request risks proxy timeouts. The existing endpoints are unchanged.
+    """,
+)
+async def uploads_init(
+    request: UploadInitRequest,
+    x_api_key: str = Header(..., alias="X-API-KEY", description="Your API key for authentication"),
+):
+    verify_api_key(x_api_key)
+
+    ext = Path(request.filename or "upload").suffix.lower()
+    if ext not in _SUPPORTED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{ext}'. Supported: {', '.join(sorted(_SUPPORTED_EXTENSIONS))}",
+        )
+
+    session = upload_manager.init(request.filename, request.total_size)
+    return UploadSessionResponse(
+        upload_id=session["upload_id"],
+        received_bytes=session["received_bytes"],
+        total_size=session["total_size"],
+    )
+
+
+@app.get(
+    "/uploads/{upload_id}",
+    response_model=UploadSessionResponse,
+    tags=["Transcription"],
+    summary="Get resumable upload status",
+    description="Return how many bytes have been received so a client can resume from the correct offset.",
+)
+async def uploads_status(
+    upload_id: str,
+    x_api_key: str = Header(..., alias="X-API-KEY", description="Your API key for authentication"),
+):
+    verify_api_key(x_api_key)
+    session = upload_manager.get(upload_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Upload session not found")
+    return UploadSessionResponse(
+        upload_id=upload_id,
+        received_bytes=session["received_bytes"],
+        total_size=session["total_size"],
+    )
+
+
+@app.post(
+    "/uploads/{upload_id}/chunk",
+    response_model=UploadSessionResponse,
+    tags=["Transcription"],
+    summary="Upload one chunk",
+    description="""
+    Append one slice of the file at byte offset `X-Chunk-Offset`. The request body is the
+    raw bytes of the slice (`application/octet-stream`). Offsets must be contiguous; a
+    re-sent chunk at an already-received offset is acked idempotently (safe to retry).
+    """,
+)
+async def uploads_chunk(
+    upload_id: str,
+    request: Request,
+    x_chunk_offset: int = Header(..., alias="X-Chunk-Offset", description="Byte offset of this chunk within the file"),
+    x_api_key: str = Header(..., alias="X-API-KEY", description="Your API key for authentication"),
+):
+    verify_api_key(x_api_key)
+    if upload_manager.get(upload_id) is None:
+        raise HTTPException(status_code=404, detail="Upload session not found")
+
+    # One bounded chunk (~tens of MB) in memory, then straight to disk. We never buffer
+    # the whole file. request.body() reads the full slice for this request only.
+    data = await request.body()
+    try:
+        session = upload_manager.append(upload_id, x_chunk_offset, data)
+    except UploadError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    return UploadSessionResponse(
+        upload_id=upload_id,
+        received_bytes=session["received_bytes"],
+        total_size=session["total_size"],
+    )
+
+
+@app.post(
+    "/uploads/{upload_id}/complete",
+    response_model=TranscribeResponse,
+    tags=["Transcription"],
+    summary="Finalize upload and queue transcription",
+    description="""
+    Finalize a resumable upload: the assembled file is moved into the worker's queue and a
+    transcription job is created (same processing path as `/transcribe-file`). Returns the
+    `job_id`; poll `GET /jobs/{job_id}` for progress.
+    """,
+)
+async def uploads_complete(
+    upload_id: str,
+    body: UploadCompleteRequest | None = None,
+    x_api_key: str = Header(..., alias="X-API-KEY", description="Your API key for authentication"),
+):
+    verify_api_key(x_api_key)
+    session = upload_manager.get(upload_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Upload session not found")
+
+    # Generate the job id first so the assembled file shares the job_id prefix the worker's
+    # cleanup matches on — identical convention to /transcribe-file.
+    job_id = str(uuid.uuid4())
+    dest_path = os.path.join(_transcription_work_dir(), f"{job_id}_upload{session['ext']}")
+    try:
+        upload_manager.complete(upload_id, dest_path)
+    except UploadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    callback_url = body.callback_url if body else None
+    google_drive_folder_id = body.google_drive_folder_id if body else None
+    callback_url_str = _resolve_callback_url(str(callback_url) if callback_url else None)
+
+    job_manager.create_job(
+        job_id=job_id,
+        callback_url=callback_url_str,
+        source_type="local_file",
+        local_file_path=dest_path,
+        original_filename=session["filename"],
+        google_drive_folder_id=google_drive_folder_id or None,
+    )
+
+    return TranscribeResponse(job_id=job_id, status="queued")
+
+
+@app.post(
+    "/uploads/{upload_id}/abort",
+    tags=["Transcription"],
+    summary="Abort a resumable upload",
+    description="Discard an in-progress upload session and delete its partial file.",
+)
+async def uploads_abort(
+    upload_id: str,
+    x_api_key: str = Header(..., alias="X-API-KEY", description="Your API key for authentication"),
+):
+    verify_api_key(x_api_key)
+    upload_manager.abort(upload_id)
+    return {"ok": True}
 
 
 @app.get(
