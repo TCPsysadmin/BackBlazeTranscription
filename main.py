@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 from services.job_manager import JobManager
 from services.transcription_worker import TranscriptionWorker
 from services.upload_manager import UploadManager, UploadError
+from services.b2_client import B2Client, B2DownloadError
 
 
 def _resolve_callback_url(url) -> str | None:
@@ -229,6 +230,30 @@ class TranscribeResponse(BaseModel):
         description="Current job status",
         examples=["queued"]
     )
+
+
+class FetchTextRequest(BaseModel):
+    media_url: HttpUrl = Field(
+        ...,
+        description="Direct B2 URL to a UTF-8 text file (e.g. an existing transcript .txt)",
+        examples=["https://f005.backblazeb2.com/file/TCPTRANSFER/folder/transcript.txt"]
+    )
+    b2_key_id: str = Field(
+        ...,
+        description="Backblaze B2 application key ID for accessing the bucket",
+        examples=["005abc1234567890000000001"]
+    )
+    b2_application_key: str = Field(
+        ...,
+        description="Backblaze B2 application key (secret) paired with b2_key_id",
+        examples=["K005abcdefghijklmnopqrstuvwxyz0123"]
+    )
+
+
+class FetchTextResponse(BaseModel):
+    text: str = Field(..., description="The decoded UTF-8 contents of the file")
+    bucket: str = Field(..., description="Bucket the file was read from")
+    file_path: str = Field(..., description="Path of the file within the bucket")
 
 
 class QueuedJobInfo(BaseModel):
@@ -480,6 +505,68 @@ async def create_transcription_job_http(
     )
 
     return TranscribeResponse(job_id=job_id, status="queued")
+
+
+@app.post(
+    "/fetchText",
+    response_model=FetchTextResponse,
+    tags=["Transcription"],
+    summary="Fetch a text file (e.g. an existing transcript) from B2",
+    description="""
+    Download a small UTF-8 text file (such as an already-produced transcript) from a
+    Backblaze B2 URL and return its contents inline. This lets a browser client read a
+    transcript stored in a private bucket without exposing B2 credentials in the browser
+    or hitting CORS limits — the server does the authenticated download.
+
+    No transcription is performed. Files larger than 10 MB are rejected.
+    """,
+    responses={
+        200: {"description": "File contents returned"},
+        400: {"description": "Invalid B2 URL"},
+        401: {"description": "Invalid or missing API key"},
+        404: {"description": "Bucket or file not found"},
+        413: {"description": "File too large"},
+    }
+)
+async def fetch_text(
+    request: FetchTextRequest,
+    x_api_key: str = Header(..., alias="X-API-KEY", description="Your API key for authentication"),
+):
+    """Download and return the contents of a B2 text file (no transcription)."""
+    from urllib.parse import urlparse, unquote
+
+    verify_api_key(x_api_key)
+
+    # Parse the B2 friendly URL into bucket + file path (same shape as /transcribeHTTP).
+    try:
+        parsed = urlparse(str(request.media_url))
+        path_parts = parsed.path.split("/")
+        if len(path_parts) < 4 or path_parts[1] != "file":
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid B2 URL format. Expected: https://f005.backblazeb2.com/file/BUCKET_NAME/path/to/file"
+            )
+        bucket_name = path_parts[2]
+        file_path = unquote("/".join(path_parts[3:]))
+        if not bucket_name or not file_path:
+            raise HTTPException(status_code=400, detail="Could not extract bucket name or file path from URL")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse B2 URL: {str(e)}")
+
+    client = B2Client(request.b2_key_id, request.b2_application_key)
+    try:
+        text = await client.download_text(bucket_name, file_path)
+    except B2DownloadError as e:
+        msg = str(e)
+        if "file_not_found" in msg or "bucket_not_found" in msg:
+            raise HTTPException(status_code=404, detail=msg)
+        if "file_too_large" in msg:
+            raise HTTPException(status_code=413, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+
+    return FetchTextResponse(text=text, bucket=bucket_name, file_path=file_path)
 
 
 # Supported video/audio extensions for direct upload

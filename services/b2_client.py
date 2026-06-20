@@ -154,6 +154,41 @@ class B2Client:
 
         return await asyncio.get_event_loop().run_in_executor(None, _get)
 
+    async def download_text(self, bucket_name: str, file_path: str, max_bytes: int = 10 * 1024 * 1024) -> str:
+        """Download a (small) text file from B2 and return it decoded as UTF-8.
+
+        Intended for transcript .txt files, not media. Refuses files larger than
+        max_bytes so a mis-pointed URL can't pull a huge object into memory.
+        """
+        import io
+
+        def _download() -> str:
+            try:
+                api = self._get_api()
+                bucket = api.get_bucket_by_name(bucket_name)
+
+                size = int(bucket.get_file_info_by_name(file_path).size)
+                if size > max_bytes:
+                    raise B2DownloadError(
+                        f"file_too_large: {size} bytes exceeds limit {max_bytes}"
+                    )
+
+                buf = io.BytesIO()
+                bucket.download_file_by_name(file_path).save(buf)
+                return buf.getvalue().decode("utf-8", errors="replace")
+            except NonExistentBucket:
+                raise B2DownloadError(f"bucket_not_found: {bucket_name}")
+            except FileNotPresent:
+                raise B2DownloadError(f"file_not_found: {file_path}")
+            except B2DownloadError:
+                raise
+            except B2Error as e:
+                raise B2DownloadError(f"b2_error: {str(e)}")
+            except Exception as e:
+                raise B2DownloadError(f"download_error: {str(e)}")
+
+        return await asyncio.get_event_loop().run_in_executor(None, _download)
+
     async def upload_file(self, bucket_name: str, local_path: str, remote_path: str):
         """Upload a file from local path to B2"""
         def _upload():
