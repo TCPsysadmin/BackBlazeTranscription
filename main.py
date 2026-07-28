@@ -322,6 +322,18 @@ class JobStatusResponse(BaseModel):
         description="Google Drive web view URL of the uploaded transcript",
         examples=["https://drive.google.com/file/d/1Bxi.../view"]
     )
+    archived_video_bucket: str | None = Field(
+        None, description="B2 bucket containing a permanently archived local upload"
+    )
+    archived_video_path: str | None = Field(
+        None, description="Permanent B2 object path for the original uploaded media"
+    )
+    thumbnail_b2_path: str | None = Field(
+        None, description="B2 object path for the generated WebP thumbnail"
+    )
+    archive_error: str | None = Field(
+        None, description="Permanent archive error, if archival failed"
+    )
 
 
 def verify_api_key(x_api_key: str = Header(...)):
@@ -988,6 +1000,10 @@ async def get_job_status(
         transcript=job.get("transcript"),
         drive_transcript_file_id=job.get("drive_transcript_file_id"),
         drive_transcript_url=job.get("drive_transcript_url"),
+        archived_video_bucket=job.get("archived_video_bucket"),
+        archived_video_path=job.get("archived_video_path"),
+        thumbnail_b2_path=job.get("thumbnail_b2_path"),
+        archive_error=job.get("archive_error"),
     )
 
 

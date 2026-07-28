@@ -22,6 +22,57 @@ class MediaProcessor:
     SUPPORTED_VIDEO_FORMATS = [".mp4", ".mov", ".avi", ".mkv", ".webm"]
     MAX_CHUNK_SIZE_MB = 20
     CHUNK_DURATION_MS = 600000  # 10 minutes in milliseconds
+
+    async def create_video_thumbnail(
+        self,
+        video_path: str,
+        output_path: str,
+        *,
+        at_seconds: float = 3.0,
+        width: int = 640,
+        height: int = 360,
+    ) -> str | None:
+        """Extract a consistently-sized WebP thumbnail from a local video.
+
+        Audio files return None. FFmpeg failures are surfaced so callers can log
+        them while preserving the already-archived source video.
+        """
+        if Path(video_path).suffix.lower() not in self.SUPPORTED_VIDEO_FORMATS:
+            return None
+
+        def _extract() -> str:
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            filter_value = (
+                f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
+            )
+            last_error = ""
+            # Very short videos may have no frame at the configured timestamp.
+            for timestamp in dict.fromkeys([max(0.0, at_seconds), 0.0]):
+                cmd = [
+                    "ffmpeg",
+                    "-y",
+                    "-ss",
+                    str(timestamp),
+                    "-i",
+                    video_path,
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    filter_value,
+                    "-c:v",
+                    "libwebp",
+                    "-quality",
+                    "82",
+                    output_path,
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode == 0 and os.path.exists(output_path):
+                    return output_path
+                last_error = result.stderr[-500:]
+            raise RuntimeError(f"thumbnail_extraction_failed: {last_error}")
+
+        return await asyncio.get_event_loop().run_in_executor(None, _extract)
     
     async def extract_audio(self, media_path: str) -> str:
         """Extract audio from media file"""

@@ -51,6 +51,10 @@ class JobManager:
                 "google_drive_folder_id": google_drive_folder_id,
                 "drive_transcript_file_id": None,
                 "drive_transcript_url": None,
+                "archived_video_bucket": None,
+                "archived_video_path": None,
+                "thumbnail_b2_path": None,
+                "archive_error": None,
                 # state
                 "callback_url": callback_url,
                 "status": "queued",
