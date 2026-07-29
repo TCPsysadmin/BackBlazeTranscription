@@ -1,5 +1,5 @@
 {
-  "name": "Flows 3-5: List Clients · Summarize · Ingest to Drive",
+  "name": "VP Ingestion API / Drive + Media Manifest",
   "nodes": [
     {
       "parameters": {
@@ -12,7 +12,10 @@
       "name": "Sticky: Flow 3",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [0, -200]
+      "position": [
+        0,
+        -200
+      ]
     },
     {
       "parameters": {
@@ -25,7 +28,10 @@
       "name": "Sticky: Flow 4",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [0, 600]
+      "position": [
+        0,
+        600
+      ]
     },
     {
       "parameters": {
@@ -38,9 +44,11 @@
       "name": "Sticky: Flow 5",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [0, 1200]
+      "position": [
+        0,
+        1200
+      ]
     },
-
     {
       "parameters": {
         "httpMethod": "GET",
@@ -52,7 +60,10 @@
       "name": "Webhook: List Clients",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [200, 0],
+      "position": [
+        200,
+        0
+      ],
       "webhookId": "list-clients"
     },
     {
@@ -68,21 +79,44 @@
               "name": "q",
               "value": "mimeType='application/vnd.google-apps.folder' and name contains 'Transcripts (' and name contains 'Intake)' and trashed=false"
             },
-            { "name": "corpora", "value": "drive" },
-            { "name": "driveId", "value": "0ACr6EEWxb_V3Uk9PVA" },
-            { "name": "includeItemsFromAllDrives", "value": "true" },
-            { "name": "supportsAllDrives", "value": "true" },
-            { "name": "fields", "value": "files(id,name)" },
-            { "name": "pageSize", "value": "100" }
+            {
+              "name": "corpora",
+              "value": "drive"
+            },
+            {
+              "name": "driveId",
+              "value": "0ACr6EEWxb_V3Uk9PVA"
+            },
+            {
+              "name": "includeItemsFromAllDrives",
+              "value": "true"
+            },
+            {
+              "name": "supportsAllDrives",
+              "value": "true"
+            },
+            {
+              "name": "fields",
+              "value": "files(id,name)"
+            },
+            {
+              "name": "pageSize",
+              "value": "100"
+            }
           ]
         },
-        "options": { "timeout": 15000 }
+        "options": {
+          "timeout": 15000
+        }
       },
       "id": "f3-search-transcripts",
       "name": "Search Transcripts Intake Folders",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [440, 0],
+      "position": [
+        440,
+        0
+      ],
       "credentials": {
         "googleDriveOAuth2Api": {
           "id": "0oZdbi7MJ9sBitgJ",
@@ -103,21 +137,44 @@
               "name": "q",
               "value": "mimeType='application/vnd.google-apps.folder' and name contains 'Summaries (' and name contains 'Intake)' and trashed=false"
             },
-            { "name": "corpora", "value": "drive" },
-            { "name": "driveId", "value": "0ACr6EEWxb_V3Uk9PVA" },
-            { "name": "includeItemsFromAllDrives", "value": "true" },
-            { "name": "supportsAllDrives", "value": "true" },
-            { "name": "fields", "value": "files(id,name)" },
-            { "name": "pageSize", "value": "100" }
+            {
+              "name": "corpora",
+              "value": "drive"
+            },
+            {
+              "name": "driveId",
+              "value": "0ACr6EEWxb_V3Uk9PVA"
+            },
+            {
+              "name": "includeItemsFromAllDrives",
+              "value": "true"
+            },
+            {
+              "name": "supportsAllDrives",
+              "value": "true"
+            },
+            {
+              "name": "fields",
+              "value": "files(id,name)"
+            },
+            {
+              "name": "pageSize",
+              "value": "100"
+            }
           ]
         },
-        "options": { "timeout": 15000 }
+        "options": {
+          "timeout": 15000
+        }
       },
       "id": "f3-search-summaries",
       "name": "Search Summaries Intake Folders",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [680, 0],
+      "position": [
+        680,
+        0
+      ],
       "credentials": {
         "googleDriveOAuth2Api": {
           "id": "0oZdbi7MJ9sBitgJ",
@@ -133,7 +190,10 @@
       "name": "Build Client List",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [920, 0]
+      "position": [
+        920,
+        0
+      ]
     },
     {
       "parameters": {
@@ -145,9 +205,11 @@
       "name": "Respond: Client List",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1160, 0]
+      "position": [
+        1160,
+        0
+      ]
     },
-
     {
       "parameters": {
         "httpMethod": "POST",
@@ -159,7 +221,10 @@
       "name": "Webhook: Summarize Text",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [200, 800],
+      "position": [
+        200,
+        800
+      ],
       "webhookId": "summarize-text"
     },
     {
@@ -170,7 +235,10 @@
       "name": "Validate Summarize Input",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [440, 800]
+      "position": [
+        440,
+        800
+      ]
     },
     {
       "parameters": {
@@ -181,19 +249,27 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Content-Type", "value": "application/json" }
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\n  \"model\": \"grok-3-fast\",\n  \"temperature\": 0.3,\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a precise meeting/transcript summarizer. Produce a structured summary without missing any vital details. Be faithful to the source and do not invent details.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify('Summarize this transcript:\\n\\n' + $json.transcript) }}\n    }\n  ]\n}",
-        "options": { "timeout": 120000 }
+        "options": {
+          "timeout": 120000
+        }
       },
       "id": "f4-grok",
       "name": "Grok: Summarize Text",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [680, 800],
+      "position": [
+        680,
+        800
+      ],
       "retryOnFail": true,
       "maxTries": 2,
       "waitBetweenTries": 3000,
@@ -212,7 +288,10 @@
       "name": "Extract Summary Text",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [920, 800]
+      "position": [
+        920,
+        800
+      ]
     },
     {
       "parameters": {
@@ -224,9 +303,11 @@
       "name": "Respond: Summary Text",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1160, 800]
+      "position": [
+        1160,
+        800
+      ]
     },
-
     {
       "parameters": {
         "httpMethod": "POST",
@@ -238,18 +319,24 @@
       "name": "Webhook: Ingest to Drive",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [200, 1600],
+      "position": [
+        200,
+        1600
+      ],
       "webhookId": "ingest-to-drive"
     },
     {
       "parameters": {
-        "jsCode": "const body = $input.first().json.body || {};\n\nconst required = ['filename', 'transcript', 'summary', 'transcripts_folder_id', 'summaries_folder_id'];\nfor (const field of required) {\n  if (!body[field] || (typeof body[field] === 'string' && !body[field].trim())) {\n    throw new Error(`Missing required field: ${field}`);\n  }\n}\n\n// Strip extension from filename if present — we add _transcript.txt / _summary.txt ourselves\nconst baseName = body.filename.replace(/\\.[^.]+$/, '');\n\nreturn [{\n  json: {\n    filename: baseName,\n    transcript: body.transcript,\n    summary: body.summary,\n    transcripts_folder_id: body.transcripts_folder_id,\n    summaries_folder_id: body.summaries_folder_id\n  }\n}];"
+        "jsCode": "const body = $input.first().json.body || {};\n\nconst required = [\n  'filename', 'transcript', 'summary', 'client_id', 'idempotency_key',\n  'source_video_id', 'transcripts_folder_id', 'summaries_folder_id'\n];\nfor (const field of required) {\n  if (!body[field] || (typeof body[field] === 'string' && !body[field].trim())) {\n    throw new Error(`Missing required field: ${field}`);\n  }\n}\n\nconst baseName = body.filename.replace(/\\.[^.]+$/, '');\nreturn [{\n  json: {\n    filename: baseName,\n    title: String(body.title || baseName).trim(),\n    transcript: body.transcript,\n    summary: body.summary,\n    client_id: body.client_id,\n    idempotency_key: body.idempotency_key,\n    source_video_id: body.source_video_id,\n    source_file: body.source_file || body.filename,\n    b2_bucket: body.b2_bucket || null,\n    b2_path: body.b2_path || null,\n    thumbnail_b2_path: body.thumbnail_b2_path || null,\n    transcripts_folder_id: body.transcripts_folder_id,\n    summaries_folder_id: body.summaries_folder_id\n  }\n}];"
       },
       "id": "f5-validate",
       "name": "Validate Ingest Input",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [440, 1600]
+      "position": [
+        440,
+        1600
+      ]
     },
     {
       "parameters": {
@@ -277,7 +364,10 @@
       "name": "Upload Transcript to Drive",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
-      "position": [680, 1600],
+      "position": [
+        680,
+        1600
+      ],
       "credentials": {
         "googleDriveOAuth2Api": {
           "id": "0oZdbi7MJ9sBitgJ",
@@ -287,13 +377,16 @@
     },
     {
       "parameters": {
-        "jsCode": "// Stash the transcript upload result and carry the validated fields forward\n// so the summary upload node has everything it needs.\nconst upload = $input.first().json;\nconst validated = $('Validate Ingest Input').first().json;\n\nreturn [{\n  json: {\n    transcript_file_id: upload.id,\n    transcript_url: upload.webViewLink || `https://drive.google.com/file/d/${upload.id}/view`,\n    filename: validated.filename,\n    summary: validated.summary,\n    summaries_folder_id: validated.summaries_folder_id\n  }\n}];"
+        "jsCode": "const upload = $input.first().json;\nconst validated = $('Validate Ingest Input').first().json;\n\nreturn [{\n  json: {\n    ...validated,\n    transcript_file_id: upload.id,\n    transcript_url: upload.webViewLink || `https://drive.google.com/file/d/${upload.id}/view`\n  }\n}];"
       },
       "id": "f5-prep-summary",
       "name": "Prep Summary Upload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [920, 1600]
+      "position": [
+        920,
+        1600
+      ]
     },
     {
       "parameters": {
@@ -321,7 +414,10 @@
       "name": "Upload Summary to Drive",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
-      "position": [1160, 1600],
+      "position": [
+        1160,
+        1600
+      ],
       "credentials": {
         "googleDriveOAuth2Api": {
           "id": "0oZdbi7MJ9sBitgJ",
@@ -331,13 +427,16 @@
     },
     {
       "parameters": {
-        "jsCode": "const summaryUpload = $input.first().json;\nconst prep = $('Prep Summary Upload').first().json;\n\nreturn [{\n  json: {\n    ok: true,\n    transcript_file_id: prep.transcript_file_id,\n    transcript_url: prep.transcript_url,\n    summary_file_id: summaryUpload.id,\n    summary_url: summaryUpload.webViewLink || `https://drive.google.com/file/d/${summaryUpload.id}/view`\n  }\n}];"
+        "jsCode": "const result = $input.first().json;\nreturn [{\n  json: {\n    ok: true,\n    source_video_id: result.source_video_id,\n    transcript_file_id: result.transcript_file_id,\n    transcript_url: result.transcript_url,\n    summary_file_id: result.summary_file_id,\n    summary_url: result.summary_url,\n    reused: false\n  }\n}];"
       },
       "id": "f5-shape",
       "name": "Shape Ingest Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1400, 1600]
+      "position": [
+        1400,
+        1600
+      ]
     },
     {
       "parameters": {
@@ -349,51 +448,291 @@
       "name": "Respond: Ingest Result",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1640, 1600]
+      "position": [
+        1640,
+        1600
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select coalesce(json_agg(json_build_object(\n  'client_id', client_id,\n  'name', display_name,\n  'transcripts_folder_id', drive_transcripts_intake_folder_id,\n  'summaries_folder_id', drive_summaries_intake_folder_id,\n  'transcripts_completed_folder_id', drive_transcripts_completed_folder_id,\n  'summaries_completed_folder_id', drive_summaries_completed_folder_id\n) order by display_name), '[]'::json) as clients\nfrom public.clients_registry\nwhere status = 'active'\n  and drive_transcripts_intake_folder_id is not null\n  and drive_summaries_intake_folder_id is not null\n  and drive_transcripts_completed_folder_id is not null\n  and drive_summaries_completed_folder_id is not null;",
+        "options": {}
+      },
+      "id": "aab428df-dadf-4115-a91f-36cc3af4c089",
+      "name": "List Registered Clients",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -560,
+        -520
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select\n  coalesce(m.status = 'completed', false) as already_completed,\n  coalesce(m.source_video_id, $2::text) as source_video_id,\n  m.transcript_drive_file_id as transcript_file_id,\n  m.transcript_url,\n  m.summary_drive_file_id as summary_file_id,\n  m.summary_url\nfrom (select 1) anchor\nleft join lateral (\n  select * from public.ingestion_manifests\n  where idempotency_key = $1::text\n  limit 1\n) m on true;",
+        "options": {
+          "queryReplacement": "={{ [ $json.idempotency_key, $json.source_video_id ] }}"
+        }
+      },
+      "id": "4a652c0a-7bcb-44ac-bccb-417f24bd0459",
+      "name": "Check Completed Ingestion",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -80,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "fdef3132-d97e-4f7b-9d2b-7b95772beca1",
+              "leftValue": "={{ $json.already_completed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4dea22af-4803-4be1-a5c0-d402524e9e19",
+      "name": "Already Completed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        140,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: {\n  ok: true,\n  source_video_id: $json.source_video_id,\n  transcript_file_id: $json.transcript_file_id,\n  transcript_url: $json.transcript_url,\n  summary_file_id: $json.summary_file_id,\n  summary_url: $json.summary_url,\n  reused: true\n} }];"
+      },
+      "id": "cf7b6058-4cdf-4c28-8bf0-4da383c56e25",
+      "name": "Reuse Completed Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        380,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select * from public.admin_complete_ingestion(\n  $1::text, $2::uuid, $3::text, $4::text, $5::text,\n  nullif($6::text, ''), nullif($7::text, ''), nullif($8::text, ''),\n  $9::text, $10::text, $11::text, $12::text, $13::text, $14::text\n);",
+        "options": {
+          "queryReplacement": "={{ [\n  $('Validate Ingest Input').first().json.idempotency_key,\n  $('Validate Ingest Input').first().json.client_id,\n  $('Validate Ingest Input').first().json.source_video_id,\n  $('Validate Ingest Input').first().json.title,\n  $('Validate Ingest Input').first().json.source_file,\n  $('Validate Ingest Input').first().json.b2_bucket || '',\n  $('Validate Ingest Input').first().json.b2_path || '',\n  $('Validate Ingest Input').first().json.thumbnail_b2_path || '',\n  $('Validate Ingest Input').first().json.transcripts_folder_id,\n  $('Validate Ingest Input').first().json.summaries_folder_id,\n  $('Prep Summary Upload').first().json.transcript_file_id,\n  $('Prep Summary Upload').first().json.transcript_url,\n  $('Upload Summary to Drive').first().json.id,\n  $('Upload Summary to Drive').first().json.webViewLink || `https://drive.google.com/file/d/${$('Upload Summary to Drive').first().json.id}/view`\n] }}"
+        }
+      },
+      "id": "66ff272d-fa95-4a22-a59d-7b03900b602d",
+      "name": "Register Media Manifest",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        980,
+        420
+      ]
     }
   ],
   "connections": {
     "Webhook: List Clients": {
-      "main": [[{ "node": "Search Transcripts Intake Folders", "type": "main", "index": 0 }]]
-    },
-    "Search Transcripts Intake Folders": {
-      "main": [[{ "node": "Search Summaries Intake Folders", "type": "main", "index": 0 }]]
-    },
-    "Search Summaries Intake Folders": {
-      "main": [[{ "node": "Build Client List", "type": "main", "index": 0 }]]
-    },
-    "Build Client List": {
-      "main": [[{ "node": "Respond: Client List", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "List Registered Clients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Webhook: Summarize Text": {
-      "main": [[{ "node": "Validate Summarize Input", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Validate Summarize Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Validate Summarize Input": {
-      "main": [[{ "node": "Grok: Summarize Text", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Grok: Summarize Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Grok: Summarize Text": {
-      "main": [[{ "node": "Extract Summary Text", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Extract Summary Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Extract Summary Text": {
-      "main": [[{ "node": "Respond: Summary Text", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Respond: Summary Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Webhook: Ingest to Drive": {
-      "main": [[{ "node": "Validate Ingest Input", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Validate Ingest Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Validate Ingest Input": {
-      "main": [[{ "node": "Upload Transcript to Drive", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Check Completed Ingestion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Upload Transcript to Drive": {
-      "main": [[{ "node": "Prep Summary Upload", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Prep Summary Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Prep Summary Upload": {
-      "main": [[{ "node": "Upload Summary to Drive", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Upload Summary to Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Upload Summary to Drive": {
-      "main": [[{ "node": "Shape Ingest Response", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Register Media Manifest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Shape Ingest Response": {
-      "main": [[{ "node": "Respond: Ingest Result", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Respond: Ingest Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Registered Clients": {
+      "main": [
+        [
+          {
+            "node": "Respond: Client List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Completed Ingestion": {
+      "main": [
+        [
+          {
+            "node": "Already Completed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already Completed?": {
+      "main": [
+        [
+          {
+            "node": "Reuse Completed Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Upload Transcript to Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reuse Completed Result": {
+      "main": [
+        [
+          {
+            "node": "Respond: Ingest Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Register Media Manifest": {
+      "main": [
+        [
+          {
+            "node": "Shape Ingest Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {

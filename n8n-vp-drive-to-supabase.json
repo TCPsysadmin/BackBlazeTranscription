@@ -1,0 +1,1535 @@
+{
+  "name": "VP Drive to Supabase / Manifest Aware",
+  "nodes": [
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "returnAll": true,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "={{ $json.intake_folder_id }}",
+            "mode": "id"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -1824,
+        16
+      ],
+      "id": "4a27b0d5-150a-43b5-ab4d-61d6408f4da1",
+      "name": "Search files and folders",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "0oZdbi7MJ9sBitgJ",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.file_id }}",
+          "mode": "id"
+        },
+        "options": {
+          "googleFileConversion": {
+            "conversion": {
+              "docsToFormat": "text/plain"
+            }
+          },
+          "fileName": "={{ $json.file_name }}"
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -1152,
+        112
+      ],
+      "id": "92cd41ad-2198-4760-af84-3b5f5e26a21d",
+      "name": "Download file",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "0oZdbi7MJ9sBitgJ",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -2288,
+        32
+      ],
+      "id": "7730222f-687b-47d1-9e31-ca21c1f586be",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "maxItems": 10
+      },
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        -1648,
+        32
+      ],
+      "id": "a1f16a9c-6b03-4b26-8115-a25fbb927c45",
+      "name": "Limit"
+    },
+    {
+      "parameters": {
+        "formTitle": "VP Onboarding",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "client_slug",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "display_name",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "plan_tier",
+              "fieldType": "dropdown",
+              "defaultValue": "standard",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "standard"
+                  },
+                  {
+                    "option": "premium"
+                  },
+                  {
+                    "option": "enterprise"
+                  }
+                ]
+              },
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.3,
+      "position": [
+        -2480,
+        -496
+      ],
+      "id": "ccb6d617-e6a4-486c-995f-9d9c57147d7d",
+      "name": "On form submission",
+      "webhookId": "d77849f4-6868-4df6-9afc-c294f21dff2f"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bff51059-3451-488b-999f-3d47663fd5b4",
+              "name": "parent_folder_id",
+              "value": "1RJQXpLXOE3cXclgpZfvSPt0U648pYuIb",
+              "type": "string"
+            },
+            {
+              "id": "1bb9f94b-d16d-468f-936f-d093f77fbe56",
+              "name": "client_slug",
+              "value": "={{ $json.client_slug }}",
+              "type": "string"
+            },
+            {
+              "id": "04210522-b524-408e-bef9-1c991864facc",
+              "name": "display_name",
+              "value": "={{ $json.display_name }}",
+              "type": "string"
+            },
+            {
+              "id": "46054f22-f7e1-4c4c-a576-b1403b10a93f",
+              "name": "plan_tier",
+              "value": "={{ $json.plan_tier }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2288,
+        -496
+      ],
+      "id": "1c9121be-8578-470a-a87d-26f1030756b6",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "name": "={{ $json.display_name }}",
+        "driveId": {
+          "__rl": true,
+          "value": "0ACr6EEWxb_V3Uk9PVA",
+          "mode": "list",
+          "cachedResultName": "Admin",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/0ACr6EEWxb_V3Uk9PVA"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "1RJQXpLXOE3cXclgpZfvSPt0U648pYuIb",
+          "mode": "list",
+          "cachedResultName": "VP - File Ingestion",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/1RJQXpLXOE3cXclgpZfvSPt0U648pYuIb"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -2080,
+        -496
+      ],
+      "id": "7cf2d070-7887-4d52-8f54-569fafd0b761",
+      "name": "create client root folder",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "0oZdbi7MJ9sBitgJ",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "name": "=Intake ({{ $json.name }})",
+        "driveId": {
+          "__rl": true,
+          "value": "0ACr6EEWxb_V3Uk9PVA",
+          "mode": "list",
+          "cachedResultName": "Admin",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/0ACr6EEWxb_V3Uk9PVA"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -1888,
+        -1104
+      ],
+      "id": "70984b5f-1722-4ec3-b0cd-ad2ef6371b8e",
+      "name": "create intake folder",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "0oZdbi7MJ9sBitgJ",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "name": "=Completed ({{ $json.name }})",
+        "driveId": {
+          "__rl": true,
+          "value": "0ACr6EEWxb_V3Uk9PVA",
+          "mode": "list",
+          "cachedResultName": "Admin",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/0ACr6EEWxb_V3Uk9PVA"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -1872,
+        -848
+      ],
+      "id": "2dab96cd-e690-42de-9668-cfd8009df6fc",
+      "name": "create completed folder",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "0oZdbi7MJ9sBitgJ",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "name": "=Transcripts ({{ $('create client root folder').item.json.name }} Intake)",
+        "driveId": {
+          "__rl": true,
+          "value": "0ACr6EEWxb_V3Uk9PVA",
+          "mode": "list",
+          "cachedResultName": "Admin",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/0ACr6EEWxb_V3Uk9PVA"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -1728,
+        -1200
+      ],
+      "id": "0ea85238-82e8-4d96-af5a-1020f6564fd7",
+      "name": "create transcript folder",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "0oZdbi7MJ9sBitgJ",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "name": "=Summaries ({{ $('create client root folder').item.json.name }} Intake)",
+        "driveId": {
+          "__rl": true,
+          "value": "0ACr6EEWxb_V3Uk9PVA",
+          "mode": "list",
+          "cachedResultName": "Admin",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/0ACr6EEWxb_V3Uk9PVA"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -1728,
+        -1056
+      ],
+      "id": "70f6d41e-2aa3-4dd0-8754-3d9dce1fd913",
+      "name": "create summaries folder",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "0oZdbi7MJ9sBitgJ",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "name": "=Transcripts ({{ $('create client root folder').item.json.name }} Completed)",
+        "driveId": {
+          "__rl": true,
+          "value": "0ACr6EEWxb_V3Uk9PVA",
+          "mode": "list",
+          "cachedResultName": "Admin",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/0ACr6EEWxb_V3Uk9PVA"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -1728,
+        -880
+      ],
+      "id": "e6c7b650-9c47-4409-bd1c-46c09008190f",
+      "name": "create transcript folder1",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "0oZdbi7MJ9sBitgJ",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "name": "=Summaries ({{ $('create client root folder').item.json.name }} Completed)",
+        "driveId": {
+          "__rl": true,
+          "value": "0ACr6EEWxb_V3Uk9PVA",
+          "mode": "list",
+          "cachedResultName": "Admin",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/0ACr6EEWxb_V3Uk9PVA"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -1728,
+        -752
+      ],
+      "id": "879e2b89-46ab-4c8b-923b-38d0dae84ceb",
+      "name": "create summaries folder1",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "0oZdbi7MJ9sBitgJ",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## ONBOARDING FORM \nWhen a new client is being onboarded, fill out this form to create their google environment folders for ingestion."
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -2352,
+        -688
+      ],
+      "id": "c2d522f3-2804-4172-bcf8-082f0ca67765",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## Ingestion Pipeline \nWill run ingestion to supabase from google environment.\n\nset the client id from the output in the set node then run"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -2256,
+        -176
+      ],
+      "id": "fc5ad229-8669-40a4-bf3e-688832974a46",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "name": "=Failed ({{ $('create client root folder').item.json.name }})",
+        "driveId": {
+          "__rl": true,
+          "value": "0ACr6EEWxb_V3Uk9PVA",
+          "mode": "list",
+          "cachedResultName": "Admin",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/0ACr6EEWxb_V3Uk9PVA"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $('create client root folder').item.json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -1696,
+        -496
+      ],
+      "id": "6725ddea-19af-47e6-8491-3f5c3f7e7c84",
+      "name": "create failed folder",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "0oZdbi7MJ9sBitgJ",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select public.admin_provision_client($1, $2) as client_id;",
+        "options": {
+          "queryReplacement": "={{ $('Edit Fields').item.json.client_slug }}\n{{ $('Edit Fields').item.json.display_name }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1424,
+        -496
+      ],
+      "id": "de3b3458-e66c-4830-a69d-e2d5a32dd5c0",
+      "name": "Setup Client in Supabase",
+      "credentials": {
+        "postgres": {
+          "id": "VTTgsAJGmour7OLv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "138d0929-0b60-4d2f-b0e8-6fa0b35bc171",
+              "name": "client_slug",
+              "value": "collaborative-process",
+              "type": "string"
+            },
+            {
+              "id": "32c88519-3c96-4d4f-af09-9c13787abc78",
+              "name": "client_id",
+              "value": "9cf14cd5-502c-415b-b93d-061c23502428",
+              "type": "string"
+            },
+            {
+              "id": "15bcf774-2360-4f66-9274-8594604d0e9c",
+              "name": "ingestion_type",
+              "value": "transcripts",
+              "type": "string"
+            },
+            {
+              "id": "92252fa6-b51b-4eee-862f-86dbd2670dbb",
+              "name": "intake_folder_id",
+              "value": "1vriqJAPwNpt9jAWQihrv4VPgu_2CbIWY",
+              "type": "string"
+            },
+            {
+              "id": "0bf259ff-9f4a-4e65-814f-1da2f3817f9a",
+              "name": "completed_folder_id",
+              "value": "1radpZLnZcoqTqGVIzwQe8EqtQXDWnEMm",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2032,
+        32
+      ],
+      "id": "0dcabf0e-faea-484d-901f-634a3ab73f5d",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const files = $input.all().map(i => i.json);\n\nif (files.length === 0) {\n  return [];\n}\n\n// Carry workflow variables forward by grabbing them from Node 2\nconst config = $('Edit Fields1').first().json;\n\n// Sort oldest first\nfiles.sort((a, b) => new Date(a.createdTime) - new Date(b.createdTime));\nconst oldest = files[0];\n\nreturn [{\n  json: {\n    file_id: oldest.id,\n    file_name: oldest.name,\n    file_size: oldest.size,\n    file_mime_type: oldest.mimeType,\n    created_time: oldest.createdTime,\n    client_id: config.client_id,\n    client_slug: config.client_slug,\n    ingestion_type: config.ingestion_type,\n    intake_folder_id: config.intake_folder_id,\n    completed_folder_id: config.completed_folder_id,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1360,
+        -224
+      ],
+      "id": "045c7516-916f-4850-afb0-0706f9438ef4",
+      "name": "Pick oldest file"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fromWebhook = $('Normalize Webhook File').isExecuted;\nconst meta = fromWebhook\n  ? $('Normalize Webhook File').first().json\n  : $('Loop Over Items').item.json;\nconst rawText = String($input.first().json.data || '').trim();\nif (!rawText) throw new Error(`Empty file: ${meta.file_name}`);\n\nconst fallbackId = meta.file_name\n  .replace(/\\.txt$/i, '')\n  .replace(/[\\s\\-_]*(transcript|summary)\\s*$/i, '')\n  .trim();\n\nreturn [{ json: {\n  ...meta,\n  source_video_id: fallbackId,\n  title: fallbackId.replace(/[-_]+/g, ' ').trim(),\n  source_file: `${fallbackId}.mp4`,\n  raw_text: rawText,\n  word_count_total: rawText.split(/\\s+/).length\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -784,
+        176
+      ],
+      "id": "cbae7248-4ff0-43f6-8d17-bfac30c9019c",
+      "name": "Extract Identity of File"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.ingestion_type}}",
+                    "rightValue": "transcripts",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "436e909a-72c1-4997-b4f3-bf3918dc2909"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "4cff0634-86ca-44ff-86a5-92fd6af2df56",
+                    "leftValue": "={{$json.ingestion_type}}",
+                    "rightValue": "Transcripts",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "2de1eb26-3b04-48d2-a01e-6dfbf67b18e6",
+                    "leftValue": "={{$json.ingestion_type}}",
+                    "rightValue": "summaries",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "13329266-d6b1-4fe2-914d-56ac772e5d0c",
+                    "leftValue": "={{$json.ingestion_type}}",
+                    "rightValue": "Summaries",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -624,
+        176
+      ],
+      "id": "bd9b0340-b5e6-40d4-b1ad-340d239eab65",
+      "name": "Filter Ingestion Type"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst TARGET_WORDS = 600;\nconst OVERLAP_WORDS = 100;\nconst MAX_CHUNKS = 500;\n\nconst rawText = item.raw_text;\n\nfunction timestampToSeconds(h, m, s) {\n  if (s !== undefined && s !== null) {\n    return parseInt(h, 10) * 3600 + parseInt(m, 10) * 60 + parseInt(s, 10);\n  }\n  return parseInt(h, 10) * 60 + parseInt(m, 10);\n}\n\n// Find all timestamp positions in the raw text\nconst matches = [];\nconst re = /\\[(\\d{1,2}):(\\d{2})(?::(\\d{2}))?\\]/g;\nlet m;\nwhile ((m = re.exec(rawText)) !== null) {\n  matches.push({\n    pos: m.index,\n    seconds: timestampToSeconds(m[1], m[2], m[3]),\n    fullMatch: m[0],\n  });\n}\n\nconst hasTimestamps = matches.length > 0;\n\n// No timestamps — fall back to plain word chunking\nif (!hasTimestamps) {\n  const words = rawText.split(/\\s+/).filter(Boolean);\n  const chunks = [];\n  let cursor = 0;\n  let chunkIndex = 0;\n\n  while (cursor < words.length) {\n    const targetEnd = Math.min(cursor + TARGET_WORDS, words.length);\n    const chunkWords = words.slice(cursor, targetEnd);\n    if (chunkWords.length === 0) break;\n\n    chunks.push({\n      chunk_index: chunkIndex,\n      start_seconds: 0,\n      end_seconds: 0,\n      speaker: null,\n      transcript_text: chunkWords.join(' '),\n      word_count: chunkWords.length,\n    });\n\n    chunkIndex++;\n    const nextCursor = targetEnd - OVERLAP_WORDS;\n    if (nextCursor <= cursor) break;\n    cursor = nextCursor;\n  }\n\n  return [{\n    json: {\n      ...item,\n      has_timestamps: false,\n      summary_text: null,\n      topics: [],\n      is_auto_summary: false,\n      chunks,\n      embedding_inputs: chunks.map(c => c.transcript_text),\n    }\n  }];\n}\n\n// Build segments — keep the timestamp marker WITH the text that follows\nconst segments = [];\nfor (let i = 0; i < matches.length; i++) {\n  const startPos = matches[i].pos;                    // ← include the timestamp\n  const endPos = i + 1 < matches.length ? matches[i + 1].pos : rawText.length;\n  const text = rawText.slice(startPos, endPos).trim();\n  if (text.length === 0) continue;\n\n  segments.push({\n    start_seconds: matches[i].seconds,\n    end_seconds: i + 1 < matches.length ? matches[i + 1].seconds : matches[i].seconds,\n    text,\n  });\n}\n\n// Group segments into chunks of ~TARGET_WORDS\nconst chunks = [];\nlet currentText = [];\nlet currentWords = 0;\nlet currentStart = segments[0].start_seconds;\nlet currentEnd = segments[0].end_seconds;\nlet chunkIndex = 0;\nlet segIdx = 0;\n\nfunction countWords(s) {\n  // Count actual words, not timestamp markers\n  return s.replace(/\\[\\d{1,2}:\\d{2}(?::\\d{2})?\\]/g, '')\n          .split(/\\s+/)\n          .filter(Boolean).length;\n}\n\nwhile (segIdx < segments.length) {\n  const seg = segments[segIdx];\n  const segWordCount = countWords(seg.text);\n\n  if (currentWords + segWordCount > TARGET_WORDS && currentWords > 0) {\n    chunks.push({\n      chunk_index: chunkIndex,\n      start_seconds: currentStart,\n      end_seconds: currentEnd,\n      speaker: null,\n      transcript_text: currentText.join(' ').replace(/\\s+/g, ' ').trim(),\n      word_count: currentWords,\n    });\n    chunkIndex++;\n\n    // Rewind for overlap\n    let overlapWords = 0;\n    let overlapStart = segIdx;\n    while (overlapStart > 0 && overlapWords < OVERLAP_WORDS) {\n      overlapStart--;\n      overlapWords += countWords(segments[overlapStart].text);\n    }\n    segIdx = overlapStart;\n    currentText = [];\n    currentWords = 0;\n    currentStart = segments[segIdx].start_seconds;\n    continue;\n  }\n\n  currentText.push(seg.text);\n  currentWords += segWordCount;\n  currentEnd = seg.end_seconds;\n  segIdx++;\n}\n\nif (currentText.length > 0) {\n  chunks.push({\n    chunk_index: chunkIndex,\n    start_seconds: currentStart,\n    end_seconds: currentEnd,\n    speaker: null,\n    transcript_text: currentText.join(' ').replace(/\\s+/g, ' ').trim(),\n    word_count: currentWords,\n  });\n}\n\nif (chunks.length > MAX_CHUNKS) {\n  throw new Error(`Too many chunks (${chunks.length}) for ${item.file_name}`);\n}\n\nreturn [{\n  json: {\n    ...item,\n    has_timestamps: true,\n    summary_text: null,\n    topics: [],\n    is_auto_summary: false,\n    chunks,\n    embedding_inputs: chunks.map(c => c.transcript_text),\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        16
+      ],
+      "id": "36f79875-cdb7-4fd3-b729-3a23ca0edb39",
+      "name": "Chunk transcripts"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\nreturn [{\n  json: {\n    ...item,\n    has_timestamps: false,\n    summary_text: item.raw_text,\n    topics: [],\n    is_auto_summary: false,\n    chunks: [],\n    embedding_inputs: [item.raw_text],\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        320
+      ],
+      "id": "dc0c9a14-441c-4422-8e9b-a6b9eb61af19",
+      "name": "Prepare summaries"
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        -992,
+        128
+      ],
+      "id": "a078309c-76e4-4cff-99ac-cd4b2184c1ff",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"text-embedding-3-small\",\n  \"input\": {{ JSON.stringify(\n    $('Resolve Ingestion Manifest').item.json.ingestion_type === 'transcripts'\n      ? $('Chunk transcripts').item.json.embedding_inputs\n      : $('Prepare summaries').item.json.embedding_inputs\n  ) }},\n  \"encoding_format\": \"float\"\n}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        32,
+        160
+      ],
+      "id": "3c3d9087-743b-4304-813a-c5b6e5018571",
+      "name": "HTTP Request",
+      "retryOnFail": true,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "openAiApi": {
+          "id": "hfIxc8vwwdyAzA8S",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const apiResponse = $input.first().json;\nconst identity = $('Resolve Ingestion Manifest').item.json;\nconst parent = identity.ingestion_type === 'transcripts'\n  ? $('Chunk transcripts').item.json\n  : $('Prepare summaries').item.json;\nconst embeddings = apiResponse?.data;\nif (!Array.isArray(embeddings) || embeddings.length === 0) {\n  throw new Error('Missing embeddings in OpenAI response');\n}\nconst fmt = arr => arr ? `[${arr.join(',')}]` : null;\nlet summary_embedding = null;\nlet chunkEmbeddings = embeddings;\nif (parent.ingestion_type === 'summaries') {\n  summary_embedding = fmt(embeddings[0].embedding);\n  chunkEmbeddings = [];\n}\nlet chunks_with_embeddings = [];\nif (parent.chunks?.length) {\n  if (chunkEmbeddings.length !== parent.chunks.length) {\n    throw new Error(`Chunk embedding mismatch: got ${chunkEmbeddings.length}, expected ${parent.chunks.length}`);\n  }\n  chunks_with_embeddings = parent.chunks.map((chunk, index) => ({\n    ...chunk,\n    embedding: fmt(chunkEmbeddings[index].embedding)\n  }));\n}\nreturn [{ json: {\n  client_id: parent.client_id,\n  source_video_id: parent.source_video_id,\n  title: parent.title,\n  source_file: parent.source_file,\n  b2_path: parent.b2_path || null,\n  thumbnail_b2_path: parent.thumbnail_b2_path || null,\n  has_timestamps: parent.has_timestamps,\n  summary_text: parent.summary_text || null,\n  summary_embedding,\n  topics: parent.topics?.length ? parent.topics : null,\n  is_auto_summary: parent.is_auto_summary,\n  chunks: chunks_with_embeddings,\n  file_id: parent.file_id,\n  file_name: parent.file_name,\n  completed_folder_id: parent.completed_folder_id,\n  ingestion_type: parent.ingestion_type\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        160
+      ],
+      "id": "17bf94a7-2ffc-4af8-acd3-fde2c0188e22",
+      "name": "format embeddings"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into public.video_summaries\n  (client_id, source_video_id, title, source_file, has_timestamps,\n   summary_text, summary_embedding, topics, b2_path, thumbnail_b2_path)\nvalues\n  ($1, $2, $3, $4, $5, nullif($6, 'null'), nullif($7, 'null')::vector,\n   nullif($8, 'null')::text[], nullif($9, 'null'), nullif($10, 'null'))\non conflict (client_id, source_video_id) do update set\n  title = excluded.title,\n  source_file = coalesce(excluded.source_file, video_summaries.source_file),\n  has_timestamps = case when $11::text = 'transcripts'\n                        then excluded.has_timestamps\n                        else video_summaries.has_timestamps end,\n  summary_text = coalesce(excluded.summary_text, video_summaries.summary_text),\n  summary_embedding = coalesce(excluded.summary_embedding, video_summaries.summary_embedding),\n  topics = case when excluded.topics is not null and array_length(excluded.topics, 1) > 0\n                then excluded.topics else video_summaries.topics end,\n  b2_path = coalesce(excluded.b2_path, video_summaries.b2_path),\n  thumbnail_b2_path = coalesce(excluded.thumbnail_b2_path, video_summaries.thumbnail_b2_path),\n  updated_at = now()\nreturning summary_id;",
+        "options": {
+          "queryReplacement": "={{ [\n  $json.client_id,\n  $json.source_video_id,\n  $json.title,\n  $json.source_file,\n  $json.has_timestamps,\n  $json.summary_text,\n  $json.summary_embedding,\n  $json.topics,\n  $json.b2_path,\n  $json.thumbnail_b2_path,\n  $json.ingestion_type\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        432,
+        160
+      ],
+      "id": "54f3613f-4b0e-46ea-8965-da52c7a7992d",
+      "name": "upsert video",
+      "credentials": {
+        "postgres": {
+          "id": "VTTgsAJGmour7OLv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const parent = $('format embeddings').first().json;\nconst summaryId = $input.first().json.summary_id;\n\nif (!parent.chunks || parent.chunks.length === 0) {\n  return [];\n}\n\nreturn parent.chunks.map(chunk => ({\n  json: {\n    client_id: parent.client_id,\n    source_video_id: parent.source_video_id,\n    summary_id: summaryId,\n    chunk_index: chunk.chunk_index,\n    start_seconds: chunk.start_seconds,\n    end_seconds: chunk.end_seconds,\n    speaker: chunk.speaker,\n    transcript_text: chunk.transcript_text,\n    embedding: chunk.embedding,\n    word_count: chunk.word_count,\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        160
+      ],
+      "id": "c76e06ab-62f1-457d-87c9-d106551d4ff7",
+      "name": "split chunks",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1056,
+        176
+      ],
+      "id": "8509bd91-09ea-4ee5-bdcb-1357bb8a706c",
+      "name": "Loop Over Items1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into public.transcript_segments\n  (client_id, source_video_id, summary_id, chunk_index,\n   start_seconds, end_seconds, speaker, transcript_text, embedding, word_count)\nvalues\n  ($1::uuid, $2::text, $3::uuid, $4::int,\n   $5::numeric, $6::numeric, nullif($7, '')::text,\n   $8::text, $9::vector, $10::int)\non conflict (client_id, source_video_id, chunk_index) do update set\n  transcript_text = excluded.transcript_text,\n  embedding       = excluded.embedding,\n  speaker         = excluded.speaker,\n  start_seconds   = excluded.start_seconds,\n  end_seconds     = excluded.end_seconds,\n  word_count      = excluded.word_count;",
+        "options": {
+          "queryReplacement": "={{ [\n  $json.client_id,\n  $json.source_video_id,\n  $json.summary_id,\n  $json.chunk_index,\n  $json.start_seconds,\n  $json.end_seconds,\n  $json.speaker,\n  $json.transcript_text,\n  $json.embedding,\n  $json.word_count\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1264,
+        256
+      ],
+      "id": "de115c3c-1f93-4714-b597-564edd6846ab",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "VTTgsAJGmour7OLv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Download file').item.json.file_id }}",
+          "mode": "id"
+        },
+        "driveId": {
+          "__rl": true,
+          "value": "0ACr6EEWxb_V3Uk9PVA",
+          "mode": "list",
+          "cachedResultName": "Admin",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/0ACr6EEWxb_V3Uk9PVA"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $('format embeddings').item.json.completed_folder_id }}",
+          "mode": "id"
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1280,
+        -80
+      ],
+      "id": "001ae7f7-c322-4ccf-b6ef-8df6fa67e6bc",
+      "name": "Move file",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "0oZdbi7MJ9sBitgJ",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select \n  $1 as p1, $2 as p2, $3 as p3, $4 as p4, $5 as p5,\n  $6 as p6, $7 as p7, $8 as p8, $9 as p9;",
+        "options": {
+          "queryReplacement": "={{ $json.client_id }}\n{{ $json.source_video_id }}\n{{ $json.title }}\n{{ $json.source_file }}\n{{ $json.has_timestamps }}\n{{ $json.summary_text }}\n{{ $json.summary_embedding }}\n{{ $json.topics }}\n{{ $json.is_auto_summary }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        496,
+        -160
+      ],
+      "id": "613a3f83-02e6-44b9-9fb9-562a3da2907d",
+      "name": "upsert video1",
+      "credentials": {
+        "postgres": {
+          "id": "VTTgsAJGmour7OLv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "35c62282-f31c-4d28-8056-1b24dfcb62a7",
+              "leftValue": "={{ $('format embeddings').item.json.chunks.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        832,
+        144
+      ],
+      "id": "18073408-2a36-475e-8d36-666ef99a5b9b",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 50
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -2272,
+        224
+      ],
+      "id": "2ab1b1f2-ed7a-4f22-8e57-293dca0d52ce",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1328,
+        16
+      ],
+      "id": "81c313dd-1634-4272-8684-7a83d44cbb3c",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "jsCode": "const inputItems = $input.all();\nif (inputItems.length === 0) return [];\n\nconst scheduled = $('Load Scheduled Intake Sources').isExecuted;\nconst configs = scheduled\n  ? $('Load Scheduled Intake Sources').all()\n  : [$('Edit Fields1').first()];\n\nreturn inputItems\n  .map((item, index) => {\n    const paired = Number(item.pairedItem?.item ?? 0);\n    const config = (configs[paired] || configs[0]).json;\n    return {\n      file: item.json,\n      config,\n      originalIndex: index\n    };\n  })\n  .sort((a, b) => new Date(a.file.createdTime) - new Date(b.file.createdTime))\n  .map(({ file, config, originalIndex }) => ({\n    json: {\n      file_id: file.id,\n      file_name: file.name,\n      file_size: file.size,\n      file_mime_type: file.mimeType,\n      created_time: file.createdTime,\n      client_id: config.client_id,\n      client_slug: config.client_slug,\n      ingestion_type: config.ingestion_type,\n      intake_folder_id: config.intake_folder_id,\n      completed_folder_id: config.completed_folder_id\n    },\n    pairedItem: { item: originalIndex }\n  }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1504,
+        240
+      ],
+      "id": "03a74cf6-972c-4408-aa4c-7004e94e8635",
+      "name": "Sort files oldest first"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select\n  client_id,\n  slug as client_slug,\n  'transcripts'::text as ingestion_type,\n  drive_transcripts_intake_folder_id as intake_folder_id,\n  drive_transcripts_completed_folder_id as completed_folder_id\nfrom public.clients_registry\nwhere status = 'active'\n  and drive_transcripts_intake_folder_id is not null\n  and drive_transcripts_completed_folder_id is not null\nunion all\nselect\n  client_id,\n  slug as client_slug,\n  'summaries'::text as ingestion_type,\n  drive_summaries_intake_folder_id as intake_folder_id,\n  drive_summaries_completed_folder_id as completed_folder_id\nfrom public.clients_registry\nwhere status = 'active'\n  and drive_summaries_intake_folder_id is not null\n  and drive_summaries_completed_folder_id is not null\norder by client_slug, ingestion_type;",
+        "options": {}
+      },
+      "id": "1abd7d0d-6b97-57be-8876-d700021991b3",
+      "name": "Load Scheduled Intake Sources",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -940,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ingest-drive-file",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "02b11f6c-0677-50f9-b99b-bb9ac834dadf",
+      "name": "Webhook: Ingest Drive File",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -940,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || {};\nconst required = ['file_id', 'file_name', 'client_id', 'ingestion_type', 'completed_folder_id'];\nfor (const field of required) {\n  if (!body[field]) throw new Error(`Missing required field: ${field}`);\n}\nreturn [{ json: {\n  file_id: body.file_id,\n  file_name: body.file_name,\n  client_id: body.client_id,\n  client_slug: body.client_slug || '',\n  ingestion_type: String(body.ingestion_type).toLowerCase(),\n  completed_folder_id: body.completed_folder_id,\n  intake_folder_id: body.intake_folder_id || ''\n} }];"
+      },
+      "id": "239d9c5a-513b-5d39-a2c1-6548b21be5bc",
+      "name": "Normalize Webhook File",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -700,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select\n  coalesce(m.client_id, $1::uuid) as client_id,\n  coalesce(m.source_video_id, $2::text) as source_video_id,\n  coalesce(m.title, $3::text) as title,\n  coalesce(m.source_file, $4::text) as source_file,\n  m.b2_path,\n  m.thumbnail_b2_path,\n  case\n    when m.transcript_drive_file_id = $5::text then 'transcripts'\n    when m.summary_drive_file_id = $5::text then 'summaries'\n    else lower($6::text)\n  end as ingestion_type,\n  coalesce(\n    case\n      when m.transcript_drive_file_id = $5::text then c.drive_transcripts_completed_folder_id\n      when m.summary_drive_file_id = $5::text then c.drive_summaries_completed_folder_id\n    end,\n    $7::text\n  ) as completed_folder_id,\n  $5::text as file_id,\n  $8::text as file_name,\n  $9::text as raw_text,\n  $10::int as word_count_total\nfrom (select 1) anchor\nleft join lateral (\n  select * from public.ingestion_manifests\n  where transcript_drive_file_id = $5::text\n     or summary_drive_file_id = $5::text\n  limit 1\n) m on true\nleft join public.clients_registry c on c.client_id = coalesce(m.client_id, $1::uuid);",
+        "options": {
+          "queryReplacement": "={{ [\n  $json.client_id,\n  $json.source_video_id,\n  $json.title,\n  $json.source_file,\n  $json.file_id,\n  $json.ingestion_type,\n  $json.completed_folder_id,\n  $json.file_name,\n  $json.raw_text,\n  $json.word_count_total\n] }}"
+        }
+      },
+      "id": "e8debcef-5b37-5806-b0ee-d4bbad343e7a",
+      "name": "Resolve Ingestion Manifest",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "delete from public.transcript_segments\nwhere client_id = $1::uuid\n  and source_video_id = $2::text\n  and $3::text = 'transcripts';\nselect summary_id\nfrom public.video_summaries\nwhere client_id = $1::uuid and source_video_id = $2::text;",
+        "options": {
+          "queryReplacement": "={{ [\n  $('format embeddings').item.json.client_id,\n  $('format embeddings').item.json.source_video_id,\n  $('format embeddings').item.json.ingestion_type\n] }}"
+        }
+      },
+      "id": "92816e8b-4651-54e5-be92-44f33887d36c",
+      "name": "Reset Transcript Chunks",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1160,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "7927162a-88c4-554f-8e3b-ef9cdbe4c941",
+              "leftValue": "={{ !$('Normalize Webhook File').isExecuted }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f636321b-dd85-597a-82e7-dedb44e8cc3a",
+      "name": "Continue Scheduled Loop?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1660,
+        80
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Search files and folders": {
+      "main": [
+        [
+          {
+            "node": "Sort files oldest first",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download file": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "create client root folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create client root folder": {
+      "main": [
+        [
+          {
+            "node": "create intake folder",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "create completed folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create intake folder": {
+      "main": [
+        [
+          {
+            "node": "create transcript folder",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "create summaries folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create completed folder": {
+      "main": [
+        [
+          {
+            "node": "create transcript folder1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "create summaries folder1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create failed folder": {
+      "main": [
+        [
+          {
+            "node": "Setup Client in Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Setup Client in Supabase": {
+      "main": [
+        []
+      ]
+    },
+    "create summaries folder1": {
+      "main": [
+        [
+          {
+            "node": "create failed folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "Search files and folders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick oldest file": {
+      "main": [
+        []
+      ]
+    },
+    "Extract Identity of File": {
+      "main": [
+        [
+          {
+            "node": "Resolve Ingestion Manifest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Ingestion Type": {
+      "main": [
+        [
+          {
+            "node": "Chunk transcripts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Chunk transcripts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare summaries",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare summaries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chunk transcripts": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Extract Identity of File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare summaries": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "format embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "format embeddings": {
+      "main": [
+        [
+          {
+            "node": "upsert video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "upsert video": {
+      "main": [
+        [
+          {
+            "node": "Reset Transcript Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "split chunks": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items1": {
+      "main": [
+        [
+          {
+            "node": "Move file",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "upsert video1": {
+      "main": [
+        []
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "split chunks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Move file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Load Scheduled Intake Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Download file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sort files oldest first": {
+      "main": [
+        [
+          {
+            "node": "Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move file": {
+      "main": [
+        [
+          {
+            "node": "Continue Scheduled Loop?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Scheduled Intake Sources": {
+      "main": [
+        [
+          {
+            "node": "Search files and folders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: Ingest Drive File": {
+      "main": [
+        [
+          {
+            "node": "Normalize Webhook File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Webhook File": {
+      "main": [
+        [
+          {
+            "node": "Download file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Ingestion Manifest": {
+      "main": [
+        [
+          {
+            "node": "Filter Ingestion Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reset Transcript Chunks": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Scheduled Loop?": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "5706f259-5a04-4303-85eb-df8a476d9c62",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "a30cdfb73c7ca722d910ca201aa45542c2ae05872683a1f5a0f11dd442ac0fe7"
+  },
+  "nodeGroups": [],
+  "id": "1afaFs9ov1gs6Xve",
+  "tags": []
+}
