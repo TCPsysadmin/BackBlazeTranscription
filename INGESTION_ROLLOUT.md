@@ -30,8 +30,8 @@ This repository now contains two importable n8n workflows:
 ## Render environment
 
 ```text
-B2_ARCHIVE_KEY_ID=<restricted server-side key ID>
-B2_ARCHIVE_APPLICATION_KEY=<restricted server-side application key>
+B2_KEY_ID=<restricted server-side key ID>
+B2_APPLICATION_KEY=<restricted server-side application key>
 B2_ARCHIVE_BUCKET=VPStorage-testcompany
 B2_VIDEO_PREFIX=videos
 B2_THUMBNAIL_PREFIX=thumbnails

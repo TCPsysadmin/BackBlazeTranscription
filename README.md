@@ -156,8 +156,8 @@ docker run -p 8000:8000 \
 3. Set environment variables in Render dashboard:
    - `API_KEY`: Your service API key
    - `OPENAI_API_KEY`: Your OpenAI API key
-   - `B2_ARCHIVE_KEY_ID`: Server-only key ID for permanent local-upload storage
-   - `B2_ARCHIVE_APPLICATION_KEY`: Server-only application key
+   - `B2_KEY_ID`: Server-only key ID for permanent local-upload storage
+   - `B2_APPLICATION_KEY`: Server-only application key
    - `B2_ARCHIVE_BUCKET`: Bucket that receives original videos and thumbnails
    - `B2_VIDEO_PREFIX`: Optional video prefix (default `videos`)
    - `B2_THUMBNAIL_PREFIX`: Optional thumbnail prefix (default `thumbnails`)

@@ -37,8 +37,8 @@ DISK_OVERHEAD_FACTOR = float(os.getenv("DISK_OVERHEAD_FACTOR", "1.20"))
 TEMP_STORAGE_DIR = os.getenv("TEMP_STORAGE_DIR", "/data")
 # Subdirectory inside TEMP_STORAGE_DIR used for in-flight job files; cleared on boot.
 TEMP_WORK_SUBDIR = "transcription_work"
-B2_ARCHIVE_KEY_ID = os.getenv("B2_ARCHIVE_KEY_ID", "").strip()
-B2_ARCHIVE_APPLICATION_KEY = os.getenv("B2_ARCHIVE_APPLICATION_KEY", "").strip()
+B2_KEY_ID = os.getenv("B2_KEY_ID", "").strip()
+B2_APPLICATION_KEY = os.getenv("B2_APPLICATION_KEY", "").strip()
 B2_ARCHIVE_BUCKET = os.getenv("B2_ARCHIVE_BUCKET", "").strip()
 B2_VIDEO_PREFIX = os.getenv("B2_VIDEO_PREFIX", "videos").strip().strip("/")
 B2_THUMBNAIL_PREFIX = os.getenv("B2_THUMBNAIL_PREFIX", "thumbnails").strip().strip("/")
@@ -311,7 +311,7 @@ class TranscriptionWorker:
         never imply that its source is safely retained when it is not.
         """
         configured = all(
-            [B2_ARCHIVE_KEY_ID, B2_ARCHIVE_APPLICATION_KEY, B2_ARCHIVE_BUCKET]
+            [B2_KEY_ID, B2_APPLICATION_KEY, B2_ARCHIVE_BUCKET]
         )
         if not configured:
             logger.warning(
@@ -328,7 +328,7 @@ class TranscriptionWorker:
         safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", original).strip("._")
         safe_name = safe_name or f"upload{Path(local_path).suffix.lower()}"
         video_path = f"{B2_VIDEO_PREFIX}/{job_id}/{safe_name}"
-        client = B2Client(B2_ARCHIVE_KEY_ID, B2_ARCHIVE_APPLICATION_KEY)
+        client = B2Client(B2_KEY_ID, B2_APPLICATION_KEY)
 
         try:
             logger.info("Job %s: Archiving source to B2 at %s", job_id, video_path)
