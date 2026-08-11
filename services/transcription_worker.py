@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import tempfile
+import re
 from pathlib import Path
 
 from services.media_processor import MediaProcessor
@@ -36,6 +37,12 @@ DISK_OVERHEAD_FACTOR = float(os.getenv("DISK_OVERHEAD_FACTOR", "1.20"))
 TEMP_STORAGE_DIR = os.getenv("TEMP_STORAGE_DIR", "/data")
 # Subdirectory inside TEMP_STORAGE_DIR used for in-flight job files; cleared on boot.
 TEMP_WORK_SUBDIR = "transcription_work"
+B2_KEY_ID = os.getenv("B2_KEY_ID", "").strip()
+B2_APPLICATION_KEY = os.getenv("B2_APPLICATION_KEY", "").strip()
+B2_ARCHIVE_BUCKET = os.getenv("B2_ARCHIVE_BUCKET", "").strip()
+B2_VIDEO_PREFIX = os.getenv("B2_VIDEO_PREFIX", "videos").strip().strip("/")
+B2_THUMBNAIL_PREFIX = os.getenv("B2_THUMBNAIL_PREFIX", "thumbnails").strip().strip("/")
+THUMBNAIL_AT_SECONDS = float(os.getenv("THUMBNAIL_AT_SECONDS", "3"))
 
 
 class TranscriptionWorker:
@@ -169,6 +176,7 @@ class TranscriptionWorker:
 
         try:
             if job.get("source_type") == "local_file":
+                await self._archive_local_media(job_id, job)
                 transcripts = await self._process_local_file(job_id, job)
             else:
                 # Build a B2 client using the credentials supplied with this job.
@@ -247,6 +255,11 @@ class TranscriptionWorker:
                 webhook_payload["b2_file_path"] = job["b2_file_path"]
             else:
                 webhook_payload["original_filename"] = job.get("original_filename")
+                if job.get("archived_video_path"):
+                    webhook_payload["b2_bucket"] = job.get("archived_video_bucket")
+                    webhook_payload["b2_file_path"] = job.get("archived_video_path")
+                if job.get("thumbnail_b2_path"):
+                    webhook_payload["thumbnail_b2_path"] = job.get("thumbnail_b2_path")
             if transcript_b2_path:
                 webhook_payload["transcript_b2_path"] = transcript_b2_path
             if drive_file:
@@ -289,6 +302,82 @@ class TranscriptionWorker:
         finally:
             self._cleanup_files(temp_files)
             self._cleanup_job_files(job_id)
+
+    async def _archive_local_media(self, job_id: str, job: dict) -> None:
+        """Permanently archive a browser-uploaded source and optional thumbnail.
+
+        Archival credentials are server-only Render environment variables. When
+        they are configured, failure is fatal: a completed local-upload job must
+        never imply that its source is safely retained when it is not.
+        """
+        configured = all(
+            [B2_KEY_ID, B2_APPLICATION_KEY, B2_ARCHIVE_BUCKET]
+        )
+        if not configured:
+            logger.warning(
+                "Job %s: B2 archive is not configured; local source remains temporary",
+                job_id,
+            )
+            return
+
+        local_path = job.get("local_file_path")
+        if not local_path or not os.path.exists(local_path):
+            raise Exception(f"local_file_not_found: {local_path}")
+
+        original = Path(job.get("original_filename") or local_path).name
+        safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", original).strip("._")
+        safe_name = safe_name or f"upload{Path(local_path).suffix.lower()}"
+        video_path = f"{B2_VIDEO_PREFIX}/{job_id}/{safe_name}"
+        client = B2Client(B2_KEY_ID, B2_APPLICATION_KEY)
+
+        try:
+            logger.info("Job %s: Archiving source to B2 at %s", job_id, video_path)
+            await asyncio.wait_for(
+                client.upload_file(B2_ARCHIVE_BUCKET, local_path, video_path),
+                timeout=B2_STREAM_TIMEOUT,
+            )
+            self.job_manager.update_job(
+                job_id,
+                archived_video_bucket=B2_ARCHIVE_BUCKET,
+                archived_video_path=video_path,
+                b2_bucket=B2_ARCHIVE_BUCKET,
+                b2_file_path=video_path,
+            )
+            job.update(
+                {
+                    "archived_video_bucket": B2_ARCHIVE_BUCKET,
+                    "archived_video_path": video_path,
+                    "b2_bucket": B2_ARCHIVE_BUCKET,
+                    "b2_file_path": video_path,
+                }
+            )
+        except Exception as exc:
+            self.job_manager.update_job(job_id, archive_error=str(exc))
+            raise Exception(f"b2_archive_failed: {exc}") from exc
+
+        thumbnail_local = os.path.join(self.temp_dir, f"{job_id}_thumbnail.webp")
+        try:
+            generated = await self.media_processor.create_video_thumbnail(
+                local_path,
+                thumbnail_local,
+                at_seconds=THUMBNAIL_AT_SECONDS,
+            )
+            if not generated:
+                return
+            thumbnail_path = f"{B2_THUMBNAIL_PREFIX}/{job_id}/thumbnail.webp"
+            await asyncio.wait_for(
+                client.upload_file(B2_ARCHIVE_BUCKET, generated, thumbnail_path),
+                timeout=B2_UPLOAD_TIMEOUT,
+            )
+            self.job_manager.update_job(job_id, thumbnail_b2_path=thumbnail_path)
+            job["thumbnail_b2_path"] = thumbnail_path
+            logger.info("Job %s: Thumbnail archived at %s", job_id, thumbnail_path)
+        except Exception as exc:
+            # The original video is already safe. A missing thumbnail should not
+            # throw away an otherwise successful transcription.
+            logger.warning("Job %s: Thumbnail generation/upload failed: %s", job_id, exc)
+        finally:
+            self._cleanup_files([thumbnail_local])
 
     async def _process_local_file(self, job_id: str, job: dict) -> list[str]:
         """Process a file already on disk (uploaded via /transcribe-file).

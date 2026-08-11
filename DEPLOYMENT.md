@@ -54,8 +54,12 @@ git push -u origin main
      ```
      API_KEY=your-secret-api-key
      OPENAI_API_KEY=sk-your-openai-api-key
-     B2_KEY_ID=your-b2-key-id
-     B2_APPLICATION_KEY=your-b2-application-key
+     B2_KEY_ID=your-server-side-b2-key-id
+     B2_APPLICATION_KEY=your-server-side-b2-application-key
+     B2_ARCHIVE_BUCKET=your-media-bucket
+     B2_VIDEO_PREFIX=videos
+     B2_THUMBNAIL_PREFIX=thumbnails
+     THUMBNAIL_AT_SECONDS=3
      ```
 
 5. **Deploy**

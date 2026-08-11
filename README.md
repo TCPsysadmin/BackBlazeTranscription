@@ -156,8 +156,18 @@ docker run -p 8000:8000 \
 3. Set environment variables in Render dashboard:
    - `API_KEY`: Your service API key
    - `OPENAI_API_KEY`: Your OpenAI API key
-   - `B2_KEY_ID`: Your Backblaze key ID
-   - `B2_APPLICATION_KEY`: Your Backblaze application key
+   - `B2_KEY_ID`: Server-only key ID for permanent local-upload storage
+   - `B2_APPLICATION_KEY`: Server-only application key
+   - `B2_ARCHIVE_BUCKET`: Bucket that receives original videos and thumbnails
+   - `B2_VIDEO_PREFIX`: Optional video prefix (default `videos`)
+   - `B2_THUMBNAIL_PREFIX`: Optional thumbnail prefix (default `thumbnails`)
+   - `THUMBNAIL_AT_SECONDS`: Optional frame timestamp (default `3`)
+
+When archive credentials are configured, local video uploads are saved under
+`<video-prefix>/<job-id>/<original-name>` before transcription. Video uploads also
+receive a 640×360 WebP thumbnail under
+`<thumbnail-prefix>/<job-id>/thumbnail.webp`. The completed job response returns
+both paths so downstream ingestion can associate them with the video record.
 
 4. Deploy! Render will build and deploy automatically.
 
