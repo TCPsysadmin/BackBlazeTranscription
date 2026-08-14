@@ -7,7 +7,7 @@ import tempfile
 import re
 from pathlib import Path
 
-from services.media_processor import MediaProcessor
+from services.media_processor import MediaProcessor, NoAudioTrackError
 from services.openai_client import OpenAITranscriber
 from services.b2_client import B2Client
 from services.webhook_client import WebhookClient
@@ -175,9 +175,18 @@ class TranscriptionWorker:
         temp_files = []
 
         try:
+            has_audio = True
             if job.get("source_type") == "local_file":
                 await self._archive_local_media(job_id, job)
-                transcripts = await self._process_local_file(job_id, job)
+                try:
+                    transcripts = await self._process_local_file(job_id, job)
+                except NoAudioTrackError:
+                    has_audio = False
+                    transcripts = []
+                    logger.info(
+                        "Job %s: No audio track; retaining archived video-only item",
+                        job_id,
+                    )
             else:
                 # Build a B2 client using the credentials supplied with this job.
                 b2_client = B2Client(job["b2_key_id"], job["b2_application_key"])
@@ -203,11 +212,15 @@ class TranscriptionWorker:
 
             # Merge transcripts
             logger.info(f"Job {job_id}: Merging transcripts")
-            full_transcript = self._merge_transcripts(transcripts)
+            full_transcript = self._merge_transcripts(transcripts) if has_audio else ""
 
             # --- Output: B2 upload (existing behaviour, only for B2-source jobs) ---
             transcript_b2_path = None
-            if job.get("upload_transcript", False) and job.get("source_type") != "local_file":
+            if (
+                has_audio
+                and job.get("upload_transcript", False)
+                and job.get("source_type") != "local_file"
+            ):
                 try:
                     logger.info(f"Job {job_id}: Uploading transcript to B2")
                     transcript_b2_path = await asyncio.wait_for(
@@ -224,7 +237,7 @@ class TranscriptionWorker:
 
             # --- Output: Google Drive upload ---
             drive_file = None
-            if job.get("google_drive_folder_id"):
+            if has_audio and job.get("google_drive_folder_id"):
                 try:
                     logger.info(f"Job {job_id}: Uploading transcript to Google Drive")
                     drive_file = await self._upload_transcript_to_drive(job, full_transcript)
@@ -243,12 +256,14 @@ class TranscriptionWorker:
                 status="completed",
                 progress=100,
                 transcript=full_transcript,
+                has_audio=has_audio,
             )
 
             webhook_payload = {
                 "job_id": job_id,
                 "status": "completed",
                 "transcript": full_transcript,
+                "has_audio": has_audio,
             }
             if job.get("source_type") != "local_file":
                 webhook_payload["b2_bucket"] = job["b2_bucket"]
@@ -778,6 +793,8 @@ class TranscriptionWorker:
         """Extract audio from media file"""
         try:
             return await self.media_processor.extract_audio(media_path)
+        except NoAudioTrackError:
+            raise
         except Exception as e:
             raise Exception(f"audio_extraction_failed: {e}")
     

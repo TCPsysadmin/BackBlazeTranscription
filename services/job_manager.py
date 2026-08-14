@@ -55,6 +55,7 @@ class JobManager:
                 "archived_video_path": None,
                 "thumbnail_b2_path": None,
                 "archive_error": None,
+                "has_audio": None,
                 # state
                 "callback_url": callback_url,
                 "status": "queued",
