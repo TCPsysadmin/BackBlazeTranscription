@@ -15,6 +15,10 @@ from pydub import AudioSegment
 logger = logging.getLogger(__name__)
 
 
+class NoAudioTrackError(RuntimeError):
+    """The supplied video is valid but contains no audio stream."""
+
+
 class MediaProcessor:
     """Handles audio extraction and chunking"""
     
@@ -92,6 +96,30 @@ class MediaProcessor:
         """Extract audio track from video file using ffmpeg directly for better performance"""
         def _extract():
             audio_path = f"{video_path}_audio.mp3"
+
+            # Silent video is valid media, not an FFmpeg installation error.
+            try:
+                probe = subprocess.run(
+                    [
+                        "ffprobe",
+                        "-v",
+                        "error",
+                        "-select_streams",
+                        "a:0",
+                        "-show_entries",
+                        "stream=index",
+                        "-of",
+                        "csv=p=0",
+                        video_path,
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+                if probe.returncode == 0 and not probe.stdout.strip():
+                    raise NoAudioTrackError("This video has no audio track.")
+            except FileNotFoundError:
+                # The FFmpeg path below retains the existing fallback behavior.
+                pass
             
             # Try ffmpeg first for better performance with large files
             try:
@@ -124,6 +152,8 @@ class MediaProcessor:
                 
             except subprocess.CalledProcessError as e:
                 logger.error(f"ffmpeg error: {e.stderr}")
+                if "does not contain any stream" in (e.stderr or "").lower():
+                    raise NoAudioTrackError("This video has no audio track.") from e
                 # Try pydub as fallback
                 logger.warning("ffmpeg failed, trying pydub fallback")
                 try:

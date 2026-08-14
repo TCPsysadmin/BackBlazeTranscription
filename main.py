@@ -312,6 +312,10 @@ class JobStatusResponse(BaseModel):
         description="Full transcript text (only available when status is completed)",
         examples=["This is the transcribed text from the audio file."]
     )
+    has_audio: bool | None = Field(
+        None,
+        description="False when a valid video contains no audio stream",
+    )
     drive_transcript_file_id: str | None = Field(
         None,
         description="Google Drive file ID of the uploaded transcript (if Drive upload was requested)",
@@ -998,6 +1002,7 @@ async def get_job_status(
         progress=job["progress"],
         error=job.get("error"),
         transcript=job.get("transcript"),
+        has_audio=job.get("has_audio"),
         drive_transcript_file_id=job.get("drive_transcript_file_id"),
         drive_transcript_url=job.get("drive_transcript_url"),
         archived_video_bucket=job.get("archived_video_bucket"),
