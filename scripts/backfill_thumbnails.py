@@ -18,7 +18,20 @@ from typing import Any
 import requests
 from b2sdk.v2 import B2Api, InMemoryAccountInfo
 
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+VIDEO_EXTENSIONS = {
+    ".avi",
+    ".flv",
+    ".m2ts",
+    ".m4v",
+    ".mkv",
+    ".mov",
+    ".mp4",
+    ".mpeg",
+    ".mpg",
+    ".mts",
+    ".webm",
+    ".wmv",
+}
 
 
 def required_env(name: str) -> str:
@@ -41,7 +54,15 @@ def thumbnail_path_for(
     try:
         relative = path.relative_to(video_root)
     except ValueError:
-        relative = path
+        # Legacy buckets such as TCP-MASTER organize videos directly beneath
+        # category folders rather than videos/<job-id>/. Include the filename
+        # stem so several videos in one category cannot overwrite each other.
+        return str(
+            PurePosixPath(thumbnail_prefix.strip("/"))
+            / path.parent
+            / path.stem
+            / "thumbnail.webp"
+        )
 
     # Current uploads use videos/<job-id>/<filename>. Preserve that job-id so
     # the backfilled object follows the same layout as newly ingested videos.
@@ -139,6 +160,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Generate/upload thumbnails and update Supabase. Default is dry-run.",
     )
+    parser.add_argument(
+        "--scan-all",
+        action="store_true",
+        help="Scan video files in every bucket folder, including legacy layouts.",
+    )
     return parser.parse_args()
 
 
@@ -173,10 +199,9 @@ def main() -> int:
     for file_version, _folder_name in bucket.ls(recursive=True):
         object_path = file_version.file_name
         existing_paths.add(object_path)
-        if (
-            object_path.startswith(f"{args.video_prefix.strip('/')}/")
-            and PurePosixPath(object_path).suffix.casefold() in VIDEO_EXTENSIONS
-        ):
+        is_video = PurePosixPath(object_path).suffix.casefold() in VIDEO_EXTENSIONS
+        is_in_video_prefix = object_path.startswith(f"{args.video_prefix.strip('/')}/")
+        if is_video and (args.scan_all or is_in_video_prefix):
             video_paths.append(object_path)
 
     by_filename: dict[str, list[str]] = defaultdict(list)
@@ -205,6 +230,7 @@ def main() -> int:
     matched = generated = linked = skipped = failed = 0
     print(f"Bucket: {args.bucket}")
     print(f"Workspaces: {', '.join(str(row['display_name']) for row in clients)}")
+    print("Video scope:", "all bucket folders" if args.scan_all else args.video_prefix)
     print(f"B2 videos found: {len(video_paths)}")
     print(f"Database rows missing thumbnail paths: {len(rows)}")
     print("Mode:", "APPLY" if args.apply else "DRY RUN")
