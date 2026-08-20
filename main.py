@@ -710,11 +710,19 @@ class UploadSessionResponse(BaseModel):
     upload_id: str = Field(..., description="Identifier for this resumable upload session")
     received_bytes: int = Field(..., description="Bytes received and persisted so far")
     total_size: int | None = Field(None, description="Total size if it was provided at init")
+    archive_bucket: str | None = Field(
+        None,
+        description="B2 bucket assigned to the completed upload",
+    )
 
 
 class UploadCompleteRequest(BaseModel):
     callback_url: HttpUrl | None = Field(None, description="Optional webhook for completion notification")
     google_drive_folder_id: str | None = Field(None, description="Optional Drive folder id for the backend to save the transcript")
+    archive_bucket: str | None = Field(
+        None,
+        description="B2 bucket that should receive the archived source and thumbnail",
+    )
 
 
 @app.post(
@@ -753,6 +761,7 @@ async def uploads_init(
         upload_id=session["upload_id"],
         received_bytes=session["received_bytes"],
         total_size=session["total_size"],
+        archive_bucket=session.get("archive_bucket"),
     )
 
 
@@ -775,6 +784,7 @@ async def uploads_status(
         upload_id=upload_id,
         received_bytes=session["received_bytes"],
         total_size=session["total_size"],
+        archive_bucket=session.get("archive_bucket"),
     )
 
 
@@ -811,6 +821,7 @@ async def uploads_chunk(
         upload_id=upload_id,
         received_bytes=session["received_bytes"],
         total_size=session["total_size"],
+        archive_bucket=session.get("archive_bucket"),
     )
 
 
@@ -846,6 +857,20 @@ async def uploads_complete(
 
     callback_url = body.callback_url if body else None
     google_drive_folder_id = body.google_drive_folder_id if body else None
+    requested_archive_bucket = (
+        str(body.archive_bucket or "").strip() if body else ""
+    )
+    session_archive_bucket = str(session.get("archive_bucket") or "").strip()
+    if (
+        requested_archive_bucket
+        and session_archive_bucket
+        and requested_archive_bucket != session_archive_bucket
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Archive bucket does not match the upload session",
+        )
+    archive_bucket = requested_archive_bucket or session_archive_bucket or None
     callback_url_str = _resolve_callback_url(str(callback_url) if callback_url else None)
 
     job_manager.create_job(
@@ -854,7 +879,7 @@ async def uploads_complete(
         source_type="local_file",
         local_file_path=dest_path,
         original_filename=session["filename"],
-        archive_bucket=session.get("archive_bucket"),
+        archive_bucket=archive_bucket,
         google_drive_folder_id=google_drive_folder_id or None,
     )
 
