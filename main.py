@@ -700,6 +700,10 @@ async def transcribe_uploaded_file(
 class UploadInitRequest(BaseModel):
     filename: str = Field(..., description="Original file name (used for extension + transcript naming)", examples=["interview.mp4"])
     total_size: int | None = Field(None, description="Total file size in bytes (enables completeness validation)", examples=[5368709120])
+    archive_bucket: str | None = Field(
+        None,
+        description="Optional B2 bucket that should receive the archived source and thumbnail",
+    )
 
 
 class UploadSessionResponse(BaseModel):
@@ -740,7 +744,11 @@ async def uploads_init(
             detail=f"Unsupported file type '{ext}'. Supported: {', '.join(sorted(_SUPPORTED_EXTENSIONS))}",
         )
 
-    session = upload_manager.init(request.filename, request.total_size)
+    session = upload_manager.init(
+        request.filename,
+        request.total_size,
+        archive_bucket=request.archive_bucket,
+    )
     return UploadSessionResponse(
         upload_id=session["upload_id"],
         received_bytes=session["received_bytes"],
@@ -846,6 +854,7 @@ async def uploads_complete(
         source_type="local_file",
         local_file_path=dest_path,
         original_filename=session["filename"],
+        archive_bucket=session.get("archive_bucket"),
         google_drive_folder_id=google_drive_folder_id or None,
     )
 

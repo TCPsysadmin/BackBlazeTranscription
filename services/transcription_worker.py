@@ -325,9 +325,8 @@ class TranscriptionWorker:
         they are configured, failure is fatal: a completed local-upload job must
         never imply that its source is safely retained when it is not.
         """
-        configured = all(
-            [B2_KEY_ID, B2_APPLICATION_KEY, B2_ARCHIVE_BUCKET]
-        )
+        archive_bucket = str(job.get("archive_bucket") or B2_ARCHIVE_BUCKET).strip()
+        configured = all([B2_KEY_ID, B2_APPLICATION_KEY, archive_bucket])
         if not configured:
             logger.warning(
                 "Job %s: B2 archive is not configured; local source remains temporary",
@@ -348,21 +347,21 @@ class TranscriptionWorker:
         try:
             logger.info("Job %s: Archiving source to B2 at %s", job_id, video_path)
             await asyncio.wait_for(
-                client.upload_file(B2_ARCHIVE_BUCKET, local_path, video_path),
+                client.upload_file(archive_bucket, local_path, video_path),
                 timeout=B2_STREAM_TIMEOUT,
             )
             self.job_manager.update_job(
                 job_id,
-                archived_video_bucket=B2_ARCHIVE_BUCKET,
+                archived_video_bucket=archive_bucket,
                 archived_video_path=video_path,
-                b2_bucket=B2_ARCHIVE_BUCKET,
+                b2_bucket=archive_bucket,
                 b2_file_path=video_path,
             )
             job.update(
                 {
-                    "archived_video_bucket": B2_ARCHIVE_BUCKET,
+                    "archived_video_bucket": archive_bucket,
                     "archived_video_path": video_path,
-                    "b2_bucket": B2_ARCHIVE_BUCKET,
+                    "b2_bucket": archive_bucket,
                     "b2_file_path": video_path,
                 }
             )
@@ -381,7 +380,7 @@ class TranscriptionWorker:
                 return
             thumbnail_path = f"{B2_THUMBNAIL_PREFIX}/{job_id}/thumbnail.webp"
             await asyncio.wait_for(
-                client.upload_file(B2_ARCHIVE_BUCKET, generated, thumbnail_path),
+                client.upload_file(archive_bucket, generated, thumbnail_path),
                 timeout=B2_UPLOAD_TIMEOUT,
             )
             self.job_manager.update_job(job_id, thumbnail_b2_path=thumbnail_path)

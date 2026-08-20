@@ -35,7 +35,12 @@ class UploadManager:
     def _part_path(self, upload_id: str, ext: str) -> str:
         return os.path.join(self.uploads_dir, f"{upload_id}{ext}")
 
-    def init(self, filename: str, total_size: Optional[int]) -> dict:
+    def init(
+        self,
+        filename: str,
+        total_size: Optional[int],
+        archive_bucket: Optional[str] = None,
+    ) -> dict:
         """Create a new upload session and its empty `.part` file."""
         upload_id = str(uuid.uuid4())
         ext = Path(filename or "upload").suffix.lower()
@@ -51,6 +56,7 @@ class UploadManager:
             "ext": ext,
             "part_path": part_path,
             "total_size": int(total_size) if total_size is not None else None,
+            "archive_bucket": (archive_bucket or "").strip() or None,
             "received_bytes": 0,
             "created_at": datetime.utcnow().isoformat(),
         }
