@@ -25,6 +25,7 @@ class JobManager:
         source_type: str = "b2",
         local_file_path: Optional[str] = None,
         original_filename: Optional[str] = None,
+        archive_bucket: Optional[str] = None,
         # Google Drive output
         google_drive_folder_id: Optional[str] = None,
         # Allow caller to supply a pre-generated ID (e.g. so the upload file can
@@ -46,6 +47,7 @@ class JobManager:
                 "b2_application_key": b2_application_key or "",
                 "local_file_path": local_file_path,
                 "original_filename": original_filename,
+                "archive_bucket": (archive_bucket or "").strip() or None,
                 # output
                 "upload_transcript": upload_transcript,
                 "google_drive_folder_id": google_drive_folder_id,
