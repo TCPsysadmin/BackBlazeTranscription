@@ -194,21 +194,29 @@ class TranscriptionWorker:
                 # Pre-flight disk check: bail before downloading if the file won't fit.
                 await self._assert_disk_space_for_job(job_id, job, b2_client)
 
-                # MP4/MOV etc. have metadata (moov) at end of file → can't parse from pipe.
-                ext = Path(job["b2_file_path"]).suffix.lower()
-                STREAM_UNSAFE_EXTS = {".mp4", ".mov", ".m4a", ".avi", ".mkv", ".webm", ".3gp", ".3g2", ".mj2"}
-                if ext in STREAM_UNSAFE_EXTS:
-                    logger.info(f"Job {job_id}: Format {ext} is not pipe-streamable, using incremental path")
-                    transcripts = await self._incremental_chunk_transcription(job_id, job, b2_client)
-                else:
-                    try:
-                        logger.info(f"Job {job_id}: Attempting streaming path (B2 → ffmpeg → segments)")
-                        transcripts = await self._stream_b2_to_transcription(job_id, job, b2_client)
-                    except Exception as stream_error:
-                        logger.warning(
-                            f"Job {job_id}: Streaming failed ({stream_error}), falling back to incremental chunking"
-                        )
+                try:
+                    # MP4/MOV etc. have metadata (moov) at end of file → can't parse from pipe.
+                    ext = Path(job["b2_file_path"]).suffix.lower()
+                    STREAM_UNSAFE_EXTS = {".mp4", ".mov", ".m4a", ".avi", ".mkv", ".webm", ".3gp", ".3g2", ".mj2"}
+                    if ext in STREAM_UNSAFE_EXTS:
+                        logger.info(f"Job {job_id}: Format {ext} is not pipe-streamable, using incremental path")
                         transcripts = await self._incremental_chunk_transcription(job_id, job, b2_client)
+                    else:
+                        try:
+                            logger.info(f"Job {job_id}: Attempting streaming path (B2 → ffmpeg → segments)")
+                            transcripts = await self._stream_b2_to_transcription(job_id, job, b2_client)
+                        except Exception as stream_error:
+                            logger.warning(
+                                f"Job {job_id}: Streaming failed ({stream_error}), falling back to incremental chunking"
+                            )
+                            transcripts = await self._incremental_chunk_transcription(job_id, job, b2_client)
+                except NoAudioTrackError:
+                    has_audio = False
+                    transcripts = []
+                    logger.info(
+                        "Job %s: B2 video has no audio; retaining video-only item",
+                        job_id,
+                    )
 
             # Merge transcripts
             logger.info(f"Job {job_id}: Merging transcripts")
@@ -733,6 +741,8 @@ class TranscriptionWorker:
                 timeout=B2_STREAM_TIMEOUT,
             )
             temp_files.append(media_path)
+
+            await self._archive_b2_thumbnail(job_id, job, media_path, b2_client)
             
             # Extract audio
             logger.info(f"Job {job_id}: Extracting audio")
@@ -763,7 +773,49 @@ class TranscriptionWorker:
             return transcripts
         finally:
             self._cleanup_files(temp_files)
-    
+
+    async def _archive_b2_thumbnail(
+        self,
+        job_id: str,
+        job: dict,
+        media_path: str,
+        b2_client: B2Client,
+    ) -> None:
+        """Generate a thumbnail for an existing B2 video without copying it."""
+        video_extensions = {
+            ".mp4",
+            ".mov",
+            ".avi",
+            ".mkv",
+            ".webm",
+            ".3gp",
+            ".3g2",
+            ".mj2",
+        }
+        if Path(media_path).suffix.lower() not in video_extensions:
+            return
+        thumbnail_local = os.path.join(self.temp_dir, f"{job_id}_thumbnail.webp")
+        try:
+            generated = await self.media_processor.create_video_thumbnail(
+                media_path,
+                thumbnail_local,
+                at_seconds=THUMBNAIL_AT_SECONDS,
+            )
+            if not generated:
+                return
+            thumbnail_path = f"{B2_THUMBNAIL_PREFIX}/{job_id}/thumbnail.webp"
+            await asyncio.wait_for(
+                b2_client.upload_file(job["b2_bucket"], generated, thumbnail_path),
+                timeout=B2_UPLOAD_TIMEOUT,
+            )
+            self.job_manager.update_job(job_id, thumbnail_b2_path=thumbnail_path)
+            job["thumbnail_b2_path"] = thumbnail_path
+            logger.info("Job %s: B2-link thumbnail archived at %s", job_id, thumbnail_path)
+        except Exception as exc:
+            logger.warning("Job %s: B2-link thumbnail generation failed: %s", job_id, exc)
+        finally:
+            self._cleanup_files([thumbnail_local])
+
     async def _download_media(self, job: dict, b2_client: B2Client) -> str:
         """Download media file from B2"""
         from services.b2_client import B2DownloadError

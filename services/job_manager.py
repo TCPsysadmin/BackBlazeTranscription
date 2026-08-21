@@ -51,8 +51,10 @@ class JobManager:
                 "google_drive_folder_id": google_drive_folder_id,
                 "drive_transcript_file_id": None,
                 "drive_transcript_url": None,
-                "archived_video_bucket": None,
-                "archived_video_path": None,
+                # B2-source media is already permanently stored. Surface the
+                # original object so callers can register it in their library.
+                "archived_video_bucket": b2_bucket if source_type == "b2" else None,
+                "archived_video_path": b2_file_path if source_type == "b2" else None,
                 "thumbnail_b2_path": None,
                 "archive_error": None,
                 "has_audio": None,
