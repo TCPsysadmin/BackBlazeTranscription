@@ -189,7 +189,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--limit",
         type=int,
-        help="Process at most this many missing-thumbnail database rows.",
+        help="Process at most this many uniquely matched missing-thumbnail rows.",
     )
     return parser.parse_args()
 
@@ -255,8 +255,6 @@ def main() -> int:
             )
         )
     total_missing_rows = len(rows)
-    if args.limit is not None:
-        rows = rows[: args.limit]
 
     matched = generated = linked = skipped = failed = 0
     print(f"Bucket: {args.bucket}")
@@ -265,7 +263,7 @@ def main() -> int:
     print(f"B2 videos found: {len(video_paths)}")
     print(f"Database rows missing thumbnail paths: {total_missing_rows}")
     if args.limit is not None:
-        print(f"Rows selected for this run: {len(rows)}")
+        print(f"Matched-video limit for this run: {args.limit}")
     print("Video reads:", "full downloads" if args.full_download else "HTTP ranges")
     print("Mode:", "APPLY" if args.apply else "DRY RUN")
 
@@ -291,6 +289,8 @@ def main() -> int:
             skipped += 1
             continue
 
+        if args.limit is not None and matched >= args.limit:
+            break
         matched += 1
         video_path = candidates[0]
         thumbnail_path = thumbnail_path_for(
