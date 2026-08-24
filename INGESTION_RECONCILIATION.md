@@ -46,9 +46,10 @@ The script lists every database video missing transcript chunks, summary text,
 or both. It also matches the row to a B2 video. No changes occur without
 `--apply`; missing and ambiguous B2 matches are always skipped.
 
-## 4. Repair BURNANDRETURN first
+## 4. Repair or restore BURNANDRETURN first
 
-Use the exact `source_video_id` printed by the audit:
+If the database audit reports a missing transcript, use the exact
+`source_video_id` printed by the audit:
 
 ```bash
 python scripts/reconcile_ingestion_gaps.py \
@@ -61,6 +62,21 @@ python scripts/reconcile_ingestion_gaps.py \
 Run the scheduled Drive-to-Supabase ingestion workflow. Confirm that the new
 transcript reached Completed, transcript chunks exist, and the agent can find
 the source before processing the remaining backlog.
+
+If Supabase already has transcript chunks but the completed Drive transcript
+file is missing, restore that artifact from the indexed transcript instead:
+
+```bash
+python scripts/reconcile_ingestion_gaps.py \
+  --client-slug collaborative-process \
+  --bucket TCP-MASTER \
+  --only "TCP003_MEETINGS_20251104 - BURNANDRETURN - MEETING RECORDING" \
+  --restore-drive-artifact transcript \
+  --apply
+```
+
+`--restore-drive-artifact` requires `--only`; it cannot recreate files for a
+whole workspace based solely on unequal folder counts.
 
 ## 5. Repair the remaining unambiguous matches
 

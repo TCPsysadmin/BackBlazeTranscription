@@ -88,6 +88,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--client-slug", default="collaborative-process")
     parser.add_argument("--bucket", default="TCP-MASTER")
     parser.add_argument("--only", help="Repair one source_video_id")
+    parser.add_argument(
+        "--restore-drive-artifact",
+        choices=("transcript", "summary"),
+        help=(
+            "Explicitly recreate one missing Drive artifact from existing database "
+            "content. Requires --only."
+        ),
+    )
     parser.add_argument("--limit", type=int, help="Maximum gaps to process")
     parser.add_argument("--poll-seconds", type=float, default=10)
     parser.add_argument("--job-timeout-minutes", type=float, default=180)
@@ -198,6 +206,8 @@ def n8n_post(
 
 def main() -> int:
     args = parse_args()
+    if args.restore_drive_artifact and not args.only:
+        raise SystemExit("--restore-drive-artifact requires --only")
     supabase = SupabaseRest(
         required_env("SUPABASE_URL"), required_env("SUPABASE_SERVICE_KEY")
     )
@@ -274,8 +284,13 @@ def main() -> int:
     gaps = []
     for video in videos:
         source_id = str(video.get("source_video_id") or "")
-        missing_transcript = source_id not in transcript_ids
-        missing_summary = not str(video.get("summary_text") or "").strip()
+        forced_source = bool(args.only and source_id == args.only)
+        missing_transcript = source_id not in transcript_ids or (
+            forced_source and args.restore_drive_artifact == "transcript"
+        )
+        missing_summary = not str(video.get("summary_text") or "").strip() or (
+            forced_source and args.restore_drive_artifact == "summary"
+        )
         if missing_transcript or missing_summary:
             gaps.append((video, missing_transcript, missing_summary))
     if args.only:
@@ -346,7 +361,7 @@ def main() -> int:
         source_id = str(video["source_video_id"])
         try:
             transcript = existing_transcripts.get(source_id, "")
-            if missing_transcript or not transcript:
+            if not transcript:
                 if not object_path:
                     raise RuntimeError("no B2 video available for transcription")
                 transcript = submit_and_wait(
@@ -373,13 +388,15 @@ def main() -> int:
                     },
                 )
             if missing_summary:
-                summary_payload = n8n_post(
-                    session,
-                    base_url=n8n_url,
-                    path="summarize-text",
-                    body={"transcript_text": transcript},
-                )
-                summary = str(summary_payload.get("summary") or "").strip()
+                summary = str(video.get("summary_text") or "").strip()
+                if not summary:
+                    summary_payload = n8n_post(
+                        session,
+                        base_url=n8n_url,
+                        path="summarize-text",
+                        body={"transcript_text": transcript},
+                    )
+                    summary = str(summary_payload.get("summary") or "").strip()
                 if not summary:
                     raise RuntimeError("summarization returned no text")
                 n8n_post(
