@@ -233,11 +233,43 @@ def main() -> int:
     )
     segments = supabase.get_all(
         "transcript_segments",
-        {"select": "source_video_id", "client_id": f"eq.{client_id}"},
+        {
+            "select": "source_video_id,chunk_index,transcript_text",
+            "client_id": f"eq.{client_id}",
+            "order": "source_video_id.asc,chunk_index.asc",
+        },
     )
     transcript_ids = {
         str(row["source_video_id"]) for row in segments if row.get("source_video_id")
     }
+    transcript_parts: dict[str, list[str]] = defaultdict(list)
+    for segment in segments:
+        source_id = str(segment.get("source_video_id") or "")
+        text = str(segment.get("transcript_text") or "").strip()
+        if source_id and text:
+            transcript_parts[source_id].append(text)
+    existing_transcripts = {
+        source_id: "\n\n".join(parts) for source_id, parts in transcript_parts.items()
+    }
+    video_ids = {
+        str(row.get("source_video_id") or "")
+        for row in videos
+        if row.get("source_video_id")
+    }
+    # A transcript can be indexed even when the corresponding summary upsert
+    # never completed. Include those sources in the repair inventory instead
+    # of limiting the audit to existing video_summaries rows.
+    for transcript_only_id in sorted(transcript_ids - video_ids):
+        videos.append(
+            {
+                "summary_id": None,
+                "source_video_id": transcript_only_id,
+                "title": transcript_only_id,
+                "source_file": transcript_only_id,
+                "b2_path": None,
+                "summary_text": None,
+            }
+        )
 
     gaps = []
     for video in videos:
@@ -268,14 +300,12 @@ def main() -> int:
 
     print(f"Workspace: {client['display_name']} ({client_id})")
     print(f"Bucket: {args.bucket}; B2 videos: {len(paths)}")
-    print(f"Database videos: {len(videos)}; incomplete videos: {len(gaps)}")
+    print(f"Database sources: {len(videos)}; incomplete sources: {len(gaps)}")
     print("Mode:", "APPLY" if args.apply else "DRY RUN")
 
-    matches: list[tuple[dict[str, Any], bool, bool, str]] = []
+    matches: list[tuple[dict[str, Any], bool, bool, str | None]] = []
     for video, missing_transcript, missing_summary in gaps:
-        object_path, reason = match_video_path(
-            video, existing_paths, by_filename, by_stem
-        )
+        source_id = str(video.get("source_video_id") or "")
         status = ", ".join(
             label
             for label, missing in (
@@ -284,10 +314,18 @@ def main() -> int:
             )
             if missing
         )
-        if not object_path:
-            print(f"SKIP {video['source_video_id']}: missing {status}; {reason}")
+        if not missing_transcript and existing_transcripts.get(source_id):
+            print(f"MATCH {source_id}: missing {status}; using indexed transcript")
+            matches.append((video, missing_transcript, missing_summary, None))
             continue
-        print(f"MATCH {video['source_video_id']}: missing {status}; B2={object_path}")
+
+        object_path, reason = match_video_path(
+            video, existing_paths, by_filename, by_stem
+        )
+        if not object_path:
+            print(f"SKIP {source_id}: missing {status}; {reason}")
+            continue
+        print(f"MATCH {source_id}: missing {status}; B2={object_path}")
         matches.append((video, missing_transcript, missing_summary, object_path))
 
     if not args.apply:
@@ -307,17 +345,21 @@ def main() -> int:
     for video, missing_transcript, missing_summary, object_path in matches:
         source_id = str(video["source_video_id"])
         try:
-            transcript = submit_and_wait(
-                session,
-                api_url=api_url,
-                api_key=api_key,
-                bucket=args.bucket,
-                object_path=object_path,
-                b2_key_id=key_id,
-                b2_application_key=application_key,
-                poll_seconds=args.poll_seconds,
-                timeout_minutes=args.job_timeout_minutes,
-            )
+            transcript = existing_transcripts.get(source_id, "")
+            if missing_transcript or not transcript:
+                if not object_path:
+                    raise RuntimeError("no B2 video available for transcription")
+                transcript = submit_and_wait(
+                    session,
+                    api_url=api_url,
+                    api_key=api_key,
+                    bucket=args.bucket,
+                    object_path=object_path,
+                    b2_key_id=key_id,
+                    b2_application_key=application_key,
+                    poll_seconds=args.poll_seconds,
+                    timeout_minutes=args.job_timeout_minutes,
+                )
             if missing_transcript:
                 n8n_post(
                     session,
