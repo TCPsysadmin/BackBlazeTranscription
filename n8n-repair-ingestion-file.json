@@ -104,8 +104,24 @@
     },
     {
       "parameters": {
+        "operation": "toText",
+        "sourceProperty": "content",
+        "binaryPropertyName": "data",
+        "options": {
+          "encoding": "utf8",
+          "fileName": "={{ $json.target_filename }}"
+        }
+      },
+      "id": "repair-create-binary",
+      "name": "Create Text File",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [1400, 400]
+    },
+    {
+      "parameters": {
         "operation": "upload",
-        "name": "={{ $json.target_filename }}",
+        "name": "={{ $('Validate Repair Input').first().json.target_filename }}",
         "driveId": {
           "__rl": true,
           "value": "0ACr6EEWxb_V3Uk9PVA",
@@ -115,11 +131,10 @@
         },
         "folderId": {
           "__rl": true,
-          "value": "={{ $json.folder_id }}",
+          "value": "={{ $('Validate Repair Input').first().json.folder_id }}",
           "mode": "id"
         },
-        "binaryData": false,
-        "fileContent": "={{ $json.content }}",
+        "inputDataFieldName": "data",
         "options": {
           "mimeType": "text/plain"
         }
@@ -128,7 +143,7 @@
       "name": "Upload Missing File",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
-      "position": [1400, 400],
+      "position": [1640, 400],
       "credentials": {
         "googleDriveOAuth2Api": {
           "id": "0oZdbi7MJ9sBitgJ",
@@ -144,7 +159,7 @@
       "name": "Shape Uploaded File",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1640, 400]
+      "position": [1880, 400]
     },
     {
       "parameters": {
@@ -156,7 +171,7 @@
       "name": "Respond: Repair Result",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1880, 300]
+      "position": [2120, 300]
     }
   ],
   "connections": {
@@ -175,11 +190,14 @@
     "Already Exists?": {
       "main": [
         [{"node": "Reuse Existing File", "type": "main", "index": 0}],
-        [{"node": "Upload Missing File", "type": "main", "index": 0}]
+        [{"node": "Create Text File", "type": "main", "index": 0}]
       ]
     },
     "Reuse Existing File": {
       "main": [[{"node": "Respond: Repair Result", "type": "main", "index": 0}]]
+    },
+    "Create Text File": {
+      "main": [[{"node": "Upload Missing File", "type": "main", "index": 0}]]
     },
     "Upload Missing File": {
       "main": [[{"node": "Shape Uploaded File", "type": "main", "index": 0}]]
