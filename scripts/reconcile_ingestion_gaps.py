@@ -329,7 +329,7 @@ def main() -> int:
             )
             if missing
         )
-        if not missing_transcript and existing_transcripts.get(source_id):
+        if existing_transcripts.get(source_id):
             print(f"MATCH {source_id}: missing {status}; using indexed transcript")
             matches.append((video, missing_transcript, missing_summary, None))
             continue
@@ -352,8 +352,6 @@ def main() -> int:
     if not transcript_folder or not summary_folder:
         raise SystemExit("Workspace intake folders are not fully configured")
 
-    api_url = required_env("TRANSCRIPTION_API_URL")
-    api_key = required_env("API_KEY")
     n8n_url = required_env("N8N_BASE_URL")
     session = requests.Session()
     repaired = failed = 0
@@ -366,8 +364,8 @@ def main() -> int:
                     raise RuntimeError("no B2 video available for transcription")
                 transcript = submit_and_wait(
                     session,
-                    api_url=api_url,
-                    api_key=api_key,
+                    api_url=required_env("TRANSCRIPTION_API_URL"),
+                    api_key=required_env("API_KEY"),
                     bucket=args.bucket,
                     object_path=object_path,
                     b2_key_id=key_id,
