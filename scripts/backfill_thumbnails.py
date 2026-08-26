@@ -2,7 +2,9 @@
 
 The script is a dry run unless --apply is supplied. It scopes database rows to
 clients_registry entries assigned to the selected B2 bucket and refuses
-ambiguous filename matches.
+ambiguous filename matches. By default, FFmpeg reads videos from a temporary
+authenticated B2 URL so it can use HTTP range requests instead of downloading
+each complete video.
 """
 
 from __future__ import annotations
@@ -105,21 +107,30 @@ class SupabaseRest:
         response.raise_for_status()
 
 
-def generate_thumbnail(video_path: Path, output_path: Path, at_seconds: float) -> None:
+def generate_thumbnail(
+    video_source: str | Path,
+    output_path: Path,
+    at_seconds: float,
+    authorization_token: str | None = None,
+) -> None:
     filter_value = (
         "scale=640:360:force_original_aspect_ratio=decrease,"
         "pad=640:360:(ow-iw)/2:(oh-ih)/2"
     )
     last_error = ""
     for timestamp in dict.fromkeys((max(0.0, at_seconds), 0.0)):
+        input_options: list[str] = []
+        if authorization_token:
+            input_options = ["-headers", f"Authorization: {authorization_token}\r\n"]
         result = subprocess.run(
             [
                 "ffmpeg",
                 "-y",
+                *input_options,
                 "-ss",
                 str(timestamp),
                 "-i",
-                str(video_path),
+                str(video_source),
                 "-frames:v",
                 "1",
                 "-vf",
@@ -137,6 +148,8 @@ def generate_thumbnail(video_path: Path, output_path: Path, at_seconds: float) -
         if result.returncode == 0 and output_path.exists():
             return
         last_error = result.stderr[-500:]
+        if authorization_token:
+            last_error = last_error.replace(authorization_token, "<redacted>")
     raise RuntimeError(f"FFmpeg could not create a thumbnail: {last_error}")
 
 
@@ -165,11 +178,26 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Scan video files in every bucket folder, including legacy layouts.",
     )
+    parser.add_argument(
+        "--full-download",
+        action="store_true",
+        help=(
+            "Download each complete video before running FFmpeg. Use only as a "
+            "fallback for files that cannot be read with HTTP range requests."
+        ),
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        help="Process at most this many uniquely matched missing-thumbnail rows.",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    if args.limit is not None and args.limit < 1:
+        raise SystemExit("--limit must be at least 1")
     key_id = required_env("B2_KEY_ID")
     application_key = required_env("B2_APPLICATION_KEY")
     supabase = SupabaseRest(
@@ -226,13 +254,17 @@ def main() -> int:
                 },
             )
         )
+    total_missing_rows = len(rows)
 
     matched = generated = linked = skipped = failed = 0
     print(f"Bucket: {args.bucket}")
     print(f"Workspaces: {', '.join(str(row['display_name']) for row in clients)}")
     print("Video scope:", "all bucket folders" if args.scan_all else args.video_prefix)
     print(f"B2 videos found: {len(video_paths)}")
-    print(f"Database rows missing thumbnail paths: {len(rows)}")
+    print(f"Database rows missing thumbnail paths: {total_missing_rows}")
+    if args.limit is not None:
+        print(f"Matched-video limit for this run: {args.limit}")
+    print("Video reads:", "full downloads" if args.full_download else "HTTP ranges")
     print("Mode:", "APPLY" if args.apply else "DRY RUN")
 
     for row in rows:
@@ -257,6 +289,8 @@ def main() -> int:
             skipped += 1
             continue
 
+        if args.limit is not None and matched >= args.limit:
+            break
         matched += 1
         video_path = candidates[0]
         thumbnail_path = thumbnail_path_for(
@@ -272,10 +306,40 @@ def main() -> int:
         try:
             if not already_exists:
                 with tempfile.TemporaryDirectory(prefix="vp-thumbnail-") as temp_dir:
-                    video_local = Path(temp_dir) / PurePosixPath(video_path).name
                     thumbnail_local = Path(temp_dir) / "thumbnail.webp"
-                    bucket.download_file_by_name(video_path).save_to(str(video_local))
-                    generate_thumbnail(video_local, thumbnail_local, args.at_seconds)
+                    if args.full_download:
+                        video_local = Path(temp_dir) / PurePosixPath(video_path).name
+                        bucket.download_file_by_name(video_path).save_to(
+                            str(video_local)
+                        )
+                        generate_thumbnail(
+                            video_local, thumbnail_local, args.at_seconds
+                        )
+                    else:
+                        download_url = b2_api.get_download_url_for_file_name(
+                            args.bucket, video_path
+                        )
+                        capabilities = set(
+                            b2_api.account_info.get_allowed().get("capabilities", [])
+                        )
+                        if "shareFiles" in capabilities:
+                            download_token = bucket.get_download_authorization(
+                                video_path, valid_duration_in_seconds=3600
+                            )
+                        else:
+                            # The account authorization token can download from
+                            # private buckets with readFiles permission. This
+                            # keeps streaming compatible with restricted keys
+                            # that do not include shareFiles.
+                            download_token = (
+                                b2_api.account_info.get_account_auth_token()
+                            )
+                        generate_thumbnail(
+                            download_url,
+                            thumbnail_local,
+                            args.at_seconds,
+                            authorization_token=download_token,
+                        )
                     bucket.upload_local_file(
                         local_file=str(thumbnail_local), file_name=thumbnail_path
                     )
