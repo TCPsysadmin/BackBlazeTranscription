@@ -1,0 +1,965 @@
+{
+  "name": "VP Ingestion v3 - All Workspaces (Manifest Aware)",
+  "nodes": [
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "returnAll": true,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "={ $('Loop Over Workspaces').item.json.transcripts_intake_folder_id || 'UNCONFIGURED' }",
+            "mode": "id"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -1712,
+        1840
+      ],
+      "id": "e56bac79-e664-4fbc-a2ed-59cdc5c3fd1c",
+      "name": "Find transcript files",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "0oZdbi7MJ9sBitgJ",
+          "name": "Google Drive account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "returnAll": true,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "={ $('Loop Over Workspaces').item.json.summaries_intake_folder_id || 'UNCONFIGURED' }",
+            "mode": "id"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -1712,
+        2080
+      ],
+      "id": "6bb94941-ed03-4609-8cce-a0d2b6d6865f",
+      "name": "Find summary files",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "0oZdbi7MJ9sBitgJ",
+          "name": "Google Drive account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Loop Over Workspaces').item.json;\nconst folderId = cfg.transcripts_intake_folder_id;\nif (!folderId) return [];\nconst all = $input.all().map(item => item.json || {});\nconst failed = all.find(file => file.error && !file.id);\nif (failed) {\n  throw new Error(`Drive search failed for ${folderId}: ` + JSON.stringify(failed.error).slice(0, 300));\n}\nconst textFile = /\\.(txt|md)$/i;\nreturn all\n  .filter(file => file.id && file.mimeType !== 'application/vnd.google-apps.folder' && (\n    textFile.test(file.name || '') || file.mimeType === 'text/plain' ||\n    file.mimeType === 'application/vnd.google-apps.document'\n  ))\n  .map(file => ({ json: {\n    file_id: file.id,\n    file_name: file.name,\n    file_size: file.size ?? null,\n    file_mime_type: file.mimeType,\n    created_time: file.createdTime,\n    client_id: cfg.client_id,\n    client_slug: cfg.client_slug,\n    transcripts_done_folder_id: cfg.transcripts_done_folder_id,\n    summaries_done_folder_id: cfg.summaries_done_folder_id,\n    max_files_per_run: cfg.max_files_per_run,\n    source_branch: 'transcripts'\n  }, pairedItem: { item: 0 } }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1488,
+        1840
+      ],
+      "id": "67f6c830-580a-4c0e-8c00-39ca01c65d65",
+      "name": "tag transcript files",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Loop Over Workspaces').item.json;\nconst folderId = cfg.summaries_intake_folder_id;\nif (!folderId) return [];\nconst all = $input.all().map(item => item.json || {});\nconst failed = all.find(file => file.error && !file.id);\nif (failed) {\n  throw new Error(`Drive search failed for ${folderId}: ` + JSON.stringify(failed.error).slice(0, 300));\n}\nconst textFile = /\\.(txt|md)$/i;\nreturn all\n  .filter(file => file.id && file.mimeType !== 'application/vnd.google-apps.folder' && (\n    textFile.test(file.name || '') || file.mimeType === 'text/plain' ||\n    file.mimeType === 'application/vnd.google-apps.document'\n  ))\n  .map(file => ({ json: {\n    file_id: file.id,\n    file_name: file.name,\n    file_size: file.size ?? null,\n    file_mime_type: file.mimeType,\n    created_time: file.createdTime,\n    client_id: cfg.client_id,\n    client_slug: cfg.client_slug,\n    transcripts_done_folder_id: cfg.transcripts_done_folder_id,\n    summaries_done_folder_id: cfg.summaries_done_folder_id,\n    max_files_per_run: cfg.max_files_per_run,\n    source_branch: 'summaries'\n  }, pairedItem: { item: 0 } }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1488,
+        2080
+      ],
+      "id": "a8f5dc62-c05a-4041-a630-52b28321fdc3",
+      "name": "tag summary files",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        -1264,
+        1920
+      ],
+      "id": "9f49b471-a831-4016-a70b-ba2aab7c07e4",
+      "name": "Merge intake"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"text-embedding-3-small\",\n  \"input\": {{ JSON.stringify($json.embedding_inputs) }},\n  \"encoding_format\": \"float\"\n}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        752,
+        2112
+      ],
+      "id": "6c4dd07f-5d5e-5aed-8db5-916f8803bd70",
+      "name": "Create Embeddings",
+      "retryOnFail": true,
+      "waitBetweenTries": 3000,
+      "maxTries": 3,
+      "credentials": {
+        "openAiApi": {
+          "id": "hfIxc8vwwdyAzA8S",
+          "name": "OpenAi account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with incoming as (\n  select *\n  from jsonb_to_recordset($4::jsonb) as c(\n    chunk_index     int,\n    start_seconds   numeric,\n    end_seconds     numeric,\n    speaker         text,\n    transcript_text text,\n    embedding       text,\n    word_count      int\n  )\n),\nins as (\n  insert into public.transcript_segments\n    (client_id, source_video_id, summary_id, chunk_index,\n     start_seconds, end_seconds, speaker, transcript_text, embedding,\n     word_count, has_timestamps)\n  select\n    $1::uuid, $2::text, $3::uuid,\n    i.chunk_index, i.start_seconds, i.end_seconds,\n    nullif(i.speaker, ''), i.transcript_text, i.embedding::vector,\n    i.word_count, $5::boolean\n  from incoming i\n  on conflict (client_id, source_video_id, chunk_index) do update set\n    transcript_text = excluded.transcript_text,\n    embedding       = excluded.embedding,\n    speaker         = excluded.speaker,\n    start_seconds   = excluded.start_seconds,\n    end_seconds     = excluded.end_seconds,\n    word_count      = excluded.word_count,\n    has_timestamps  = excluded.has_timestamps\n  returning 1\n),\ndel as (\n  -- Re-ingesting a shorter version of a file used to leave the extra chunks\n  -- behind forever. Guarded so the summaries pass (0 incoming chunks) can\n  -- never wipe a transcript.\n  delete from public.transcript_segments t\n   where t.client_id = $1::uuid\n     and t.source_video_id = $2::text\n     and (select count(*) from incoming) > 0\n     and t.chunk_index >= (select count(*) from incoming)\n  returning 1\n)\nselect (select count(*) from ins)::int as chunks_written,\n       (select count(*) from del)::int as stale_chunks_removed;",
+        "options": {
+          "queryReplacement": "={{ [\n  $('Format Embeddings').first().json.client_id,\n  $('Format Embeddings').first().json.source_video_id,\n  $json.summary_id,\n  JSON.stringify($('Format Embeddings').first().json.chunks),\n  $('Format Embeddings').first().json.has_timestamps\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1424,
+        2112
+      ],
+      "id": "2a651d55-db76-5589-8daa-4568ea12b3e0",
+      "name": "Write Transcript Chunks",
+      "credentials": {
+        "postgres": {
+          "id": "VTTgsAJGmour7OLv",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into public.job_runs\n  (client_id, kind, status, started_at, finished_at, payload)\nvalues ($1::uuid, 'ingest', 'succeeded', now(), now(), $2::jsonb)\nreturning job_run_id;",
+        "options": {
+          "queryReplacement": "={{ [\n  $('Resolve Ingestion Manifest').first().json.client_id,\n  JSON.stringify({\n    file_id:              $('Resolve Ingestion Manifest').first().json.file_id,\n    file_name:            $('Resolve Ingestion Manifest').first().json.file_name,\n    source_video_id:      $('Resolve Ingestion Manifest').first().json.source_video_id,\n    ingestion_type:       $('Resolve Ingestion Manifest').first().json.ingestion_type,\n    has_timestamps:       $('Format Embeddings').first().json.has_timestamps,\n    chunks_expected:      $('Format Embeddings').first().json.chunk_count,\n    chunks_written:       $json.chunks_written,\n    stale_chunks_removed: $json.stale_chunks_removed\n  })\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2096,
+        2112
+      ],
+      "id": "1a15d02a-2fa8-5b66-85ee-53723e008950",
+      "name": "Log Success",
+      "credentials": {
+        "postgres": {
+          "id": "VTTgsAJGmour7OLv",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let meta = {};\ntry { meta = $('Resolve Ingestion Manifest').first().json || {}; }\ncatch (_) {\n  try { meta = $('Extract File Identity').first().json || {}; } catch (_) {}\n}\nconst incoming = $input.first().json || {};\nconst original = incoming.json || incoming.item || incoming;\nconst raw = incoming.error || incoming.message || original.error || 'Unknown ingestion error';\nlet message;\ntry { message = typeof raw === 'string' ? raw : JSON.stringify(raw); }\ncatch (_) { message = String(raw); }\nreturn [{ json: {\n  client_id: meta.client_id || original.client_id || null,\n  file_id: meta.file_id || original.file_id || null,\n  file_name: meta.file_name || original.file_name || null,\n  source_video_id: meta.source_video_id || original.source_video_id || null,\n  ingestion_type: meta.ingestion_type || original.ingestion_type || null,\n  error: message.slice(0, 2000)\n}, pairedItem: { item: 0 } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        2448
+      ],
+      "id": "aa15a038-e2c5-5b4c-8159-44680ffa0016",
+      "name": "Build Failure Record"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into public.job_runs\n  (client_id, kind, status, started_at, finished_at, error, payload)\nvalues ($1::uuid, 'ingest', 'failed', now(), now(), $2::text, $3::jsonb)\nreturning job_run_id;",
+        "options": {
+          "queryReplacement": "={{ [\n  $json.client_id,\n  $json.error,\n  JSON.stringify({\n    file_id:         $json.file_id,\n    file_name:       $json.file_name,\n    source_video_id: $json.source_video_id,\n    ingestion_type:  $json.ingestion_type\n  })\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1424,
+        2448
+      ],
+      "id": "073f844c-d2eb-5dca-a99f-108eb63905b9",
+      "name": "Log Failure",
+      "credentials": {
+        "postgres": {
+          "id": "VTTgsAJGmour7OLv",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Sorts across BOTH intake branches, before the Limit node. The old order was\n// Search -> Limit -> Sort, which limited first and therefore never actually\n// processed the backlog oldest-first.\nconst files = $input.all()\n  .map(i => i.json)\n  .filter(f => f && f.file_id);\n\nif (files.length === 0) {\n  return [{ json: { no_files: true } }];\n}\n\nreturn files\n  .sort((a, b) => new Date(a.created_time) - new Date(b.created_time))\n  .map(f => ({ json: f, pairedItem: { item: 0 } }));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1040,
+        1920
+      ],
+      "id": "b98a65e7-3bc6-5594-9af5-1039d760df50",
+      "name": "Sort Files Oldest First"
+    },
+    {
+      "parameters": {
+        "maxItems": "={{ $json.max_files_per_run || 10 }}"
+      },
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        -816,
+        1920
+      ],
+      "id": "2e7cfb7f-810c-5363-b2d6-99816c3315fa",
+      "name": "Limit Workspace Batch"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -592,
+        1920
+      ],
+      "id": "50bca7bc-ccb2-5ba5-a89c-bae7173dc452",
+      "name": "Loop Over Files"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Runs once per outer-loop iteration, BEFORE the download, so that a file that\n// fails to download or parse can still be named in the failure log.\nconst meta = $input.first().json;\nconst cfg = meta;\n\nconst base = String(meta.file_name || '').replace(/\\.(txt|md)$/i, '').trim();\nif (!base) {\n  throw new Error('File has no usable name');\n}\n\n// Decide the type from the FILE, not from a hand-edited workflow field.\n// This is what removes the manual transcripts/summaries switch: a mixed batch\n// now ingests correctly in a single run.\nconst isSummary = /[\\s\\-_]*(summary|summaryplaud)\\s*$/i.test(base);\nconst ingestionType = isSummary ? 'summaries' : 'transcripts';\n\n// Strip exactly ONE trailing type suffix. Gemini exports are genuinely named\n// \"<name>_transcript_transcript.txt\" -> id \"<name>_transcript\", which is what\n// is already in Supabase. Stripping more than one would split those videos.\n// \"_SummaryPlaud\" is included because it was not before -- that is why\n// \"PLANNING RAMBLE_SummaryPlaud\" landed as its own row instead of merging.\nconst sourceVideoId = base\n  .replace(/[\\s\\-_]*(transcript|summary|summaryplaud)\\s*$/i, '')\n  .trim();\n\n// Collapse separator runs. Without the second replace \"X_Y - SO WHAT\" became\n// \"X Y   SO WHAT\" (three spaces). HTML collapses that to one space on screen,\n// so VP prints the name correctly and then cannot find it again -- the backend\n// lookup was whitespace-exact. 269 of 275 stored titles hit this.\nconst title = sourceVideoId\n  .replace(/[-_]+/g, ' ')\n  .replace(/\\s+/g, ' ')\n  .trim();\n\n// Destination follows the DETECTED type, not the folder the file came from, so\n// a summary dropped in the transcripts intake still files itself correctly.\nconst doneFolderId =\n  (isSummary ? cfg.summaries_done_folder_id : cfg.transcripts_done_folder_id)\n  || meta.done_folder_id;\n\nif (!doneFolderId) {\n  throw new Error(\n    `No completed folder configured for ${ingestionType} ` +\n    `(configure the completed folder in public.clients_registry)`\n  );\n}\n\nreturn [{\n  json: {\n    ...meta,\n    client_id: cfg.client_id,\n    client_slug: cfg.client_slug,\n    ingestion_type: ingestionType,\n    source_video_id: sourceVideoId,\n    title,\n    source_file: `${sourceVideoId}.mp4`,\n    done_folder_id: doneFolderId,\n    failed_folder_id: null,\n  },\n  pairedItem: { item: 0 },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        2112
+      ],
+      "id": "1c116f5a-5739-5dba-9fc7-915fb597ec83",
+      "name": "Extract File Identity",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.file_id }}",
+          "mode": "id"
+        },
+        "options": {
+          "googleFileConversion": {
+            "conversion": {
+              "docsToFormat": "text/plain"
+            }
+          },
+          "fileName": "={{ $json.file_name }}"
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        80,
+        2112
+      ],
+      "id": "a7dd432a-da89-5aea-a014-1f4abd02c26b",
+      "name": "Download Drive File",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "0oZdbi7MJ9sBitgJ",
+          "name": "Google Drive account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        304,
+        2112
+      ],
+      "id": "d21ea5f8-a063-5128-ad11-b0e49f3176df",
+      "name": "Extract Text",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const meta = $('Resolve Ingestion Manifest').first().json;\n\nconst rawText = String($input.first().json.data || '').trim();\nif (!rawText) {\n  throw new Error(`Empty file: ${meta.file_name}`);\n}\n\nconst item = {\n  ...meta,\n  raw_text: rawText,\n  word_count_total: rawText.split(/\\s+/).length,\n};\n\n// ---- summaries: one embedding for the whole document, no chunks ------------\nif (item.ingestion_type === 'summaries') {\n  return [{\n    json: {\n      ...item,\n      has_timestamps: false,\n      summary_text: item.raw_text,\n      topics: [],\n      is_auto_summary: false,\n      chunks: [],\n      embedding_inputs: [item.raw_text],\n    },\n    pairedItem: { item: 0 },\n  }];\n}\n\n// ---- transcripts ----------------------------------------------------------\nconst TARGET_WORDS = 600;\nconst OVERLAP_WORDS = 100;\nconst MAX_CHUNKS = 500;\n// One embeddings request carries every chunk. text-embedding-3-small caps a\n// request at ~300k tokens; ~4 chars per token gives a safe ceiling of 900k\n// chars. Failing loudly here beats a truncated vector set.\nconst MAX_EMBED_CHARS = 900000;\n\nfunction timestampToSeconds(h, m, s) {\n  if (s !== undefined && s !== null) {\n    return parseInt(h, 10) * 3600 + parseInt(m, 10) * 60 + parseInt(s, 10);\n  }\n  return parseInt(h, 10) * 60 + parseInt(m, 10);\n}\n\n// Find all timestamp positions in the raw text\nconst matches = [];\nconst re = /\\[(\\d{1,2}):(\\d{2})(?::(\\d{2}))?\\]/g;\nlet m;\nwhile ((m = re.exec(rawText)) !== null) {\n  matches.push({\n    pos: m.index,\n    seconds: timestampToSeconds(m[1], m[2], m[3]),\n    fullMatch: m[0],\n  });\n}\n\nconst hasTimestamps = matches.length > 0;\n\nfunction finish(chunks, timestamped) {\n  if (chunks.length > MAX_CHUNKS) {\n    throw new Error(`Too many chunks (${chunks.length}) for ${item.file_name}`);\n  }\n  const inputs = chunks.map(c => c.transcript_text);\n  const totalChars = inputs.reduce((n, t) => n + t.length, 0);\n  if (totalChars > MAX_EMBED_CHARS) {\n    throw new Error(\n      `${item.file_name} is too large for a single embeddings request ` +\n      `(${totalChars} chars across ${chunks.length} chunks); split the file`\n    );\n  }\n  return [{\n    json: {\n      ...item,\n      has_timestamps: timestamped,\n      summary_text: null,\n      topics: [],\n      is_auto_summary: false,\n      chunks,\n      embedding_inputs: inputs,\n    },\n    pairedItem: { item: 0 },\n  }];\n}\n\n// No timestamps -- fall back to plain word chunking\nif (!hasTimestamps) {\n  const words = rawText.split(/\\s+/).filter(Boolean);\n  const chunks = [];\n  let cursor = 0;\n  let chunkIndex = 0;\n\n  while (cursor < words.length) {\n    const targetEnd = Math.min(cursor + TARGET_WORDS, words.length);\n    const chunkWords = words.slice(cursor, targetEnd);\n    if (chunkWords.length === 0) break;\n\n    chunks.push({\n      chunk_index: chunkIndex,\n      start_seconds: 0,\n      end_seconds: 0,\n      speaker: null,\n      transcript_text: chunkWords.join(' '),\n      word_count: chunkWords.length,\n    });\n\n    chunkIndex++;\n    if (targetEnd === words.length) break;\n    const nextCursor = targetEnd - OVERLAP_WORDS;\n    if (nextCursor <= cursor) break;\n    cursor = nextCursor;\n  }\n\n  return finish(chunks, false);\n}\n\n// Build segments -- keep the timestamp marker WITH the text that follows\nconst segments = [];\nfor (let i = 0; i < matches.length; i++) {\n  const startPos = matches[i].pos;\n  const endPos = i + 1 < matches.length ? matches[i + 1].pos : rawText.length;\n  const text = rawText.slice(startPos, endPos).trim();\n  if (text.length === 0) continue;\n\n  segments.push({\n    start_seconds: matches[i].seconds,\n    end_seconds: i + 1 < matches.length ? matches[i + 1].seconds : matches[i].seconds,\n    text,\n  });\n}\n\n// Group segments into chunks while guaranteeing that each pass advances.\nconst chunks = [];\nlet chunkIndex = 0;\nlet segIdx = 0;\n\nfunction countWords(s) {\n  return s.replace(/\\[\\d{1,2}:\\d{2}(?::\\d{2})?\\]/g, '')\n          .split(/\\s+/)\n          .filter(Boolean).length;\n}\n\nwhile (segIdx < segments.length) {\n  const chunkStart = segIdx;\n  const current = [];\n  let currentWords = 0;\n  let currentEnd = segments[segIdx].end_seconds;\n\n  while (segIdx < segments.length) {\n    const segmentWords = countWords(segments[segIdx].text);\n    if (currentWords > 0 && currentWords + segmentWords > TARGET_WORDS) break;\n    current.push(segments[segIdx].text);\n    currentWords += segmentWords;\n    currentEnd = segments[segIdx].end_seconds;\n    segIdx++;\n  }\n\n  chunks.push({\n    chunk_index: chunkIndex++,\n    start_seconds: segments[chunkStart].start_seconds,\n    end_seconds: currentEnd,\n    speaker: null,\n    transcript_text: current.join(' ').replace(/\\s+/g, ' ').trim(),\n    word_count: currentWords,\n  });\n\n  if (segIdx >= segments.length) break;\n\n  let overlapStart = segIdx;\n  let overlapWords = 0;\n  while (overlapStart > chunkStart && overlapWords < OVERLAP_WORDS) {\n    overlapStart--;\n    overlapWords += countWords(segments[overlapStart].text);\n  }\n  // A single oversized timestamp segment cannot be overlapped safely. Move\n  // to the next segment instead of processing the same segment forever.\n  segIdx = overlapStart > chunkStart ? overlapStart : Math.max(segIdx, chunkStart + 1);\n}\n\nreturn finish(chunks, true);\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        528,
+        2112
+      ],
+      "id": "a06614eb-65fe-5a68-aa4c-65e880b7785e",
+      "name": "Prepare Content",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const apiResponse = $input.first().json;\nconst parent = $('Prepare Content').first().json;\n\nconst embeddings = apiResponse?.data;\nif (!Array.isArray(embeddings) || embeddings.length === 0) {\n  throw new Error('Missing embeddings in OpenAI response');\n}\n\nconst fmt = (arr) => (arr ? `[${arr.join(',')}]` : null);\n\nlet summary_embedding = null;\nlet chunkEmbeddings = embeddings;\n\nif (parent.ingestion_type === 'summaries') {\n  summary_embedding = fmt(embeddings[0].embedding);\n  chunkEmbeddings = [];\n}\n\nlet chunks_with_embeddings = [];\nif (parent.chunks && parent.chunks.length > 0) {\n  if (chunkEmbeddings.length !== parent.chunks.length) {\n    throw new Error(\n      `Chunk embedding mismatch for ${parent.file_name}: ` +\n      `got ${chunkEmbeddings.length}, expected ${parent.chunks.length}`\n    );\n  }\n  chunks_with_embeddings = parent.chunks.map((c, i) => ({\n    ...c,\n    embedding: fmt(chunkEmbeddings[i].embedding),\n  }));\n}\n\nreturn [{\n  json: {\n    client_id: parent.client_id,\n    source_video_id: parent.source_video_id,\n    title: parent.title,\n    source_file: parent.source_file,\n    has_timestamps: parent.has_timestamps,\n    b2_bucket: parent.b2_bucket || null,\n    b2_path: parent.b2_path || null,\n    thumbnail_b2_path: parent.thumbnail_b2_path || null,\n    // No zero-width-space prefix. The old node prepended \\u200B to every\n    // summary, which broke every exact-text lookup against summary_text.\n    summary_text: parent.summary_text || null,\n    summary_embedding,\n    topics: parent.topics && parent.topics.length > 0 ? parent.topics : null,\n    is_auto_summary: parent.is_auto_summary,\n    chunks: chunks_with_embeddings,\n    chunk_count: chunks_with_embeddings.length,\n    file_id: parent.file_id,\n    file_name: parent.file_name,\n    ingestion_type: parent.ingestion_type,\n    done_folder_id: parent.done_folder_id,\n  },\n  pairedItem: { item: 0 },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        976,
+        2112
+      ],
+      "id": "bb4ae07b-533d-5f1f-9313-3485439f5ed5",
+      "name": "Format Embeddings",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into public.video_summaries\n  (client_id, source_video_id, title, source_file, has_timestamps,\n   summary_text, summary_embedding, topics, b2_path, thumbnail_b2_path)\nvalues\n  ($1, $2, $3, $4, $5, nullif($6, 'null'), nullif($7, 'null')::vector,\n   nullif($8, 'null')::text[], nullif($9, 'null'), nullif($10, 'null'))\non conflict (client_id, source_video_id) do update set\n  title = excluded.title,\n  source_file = case\n    when excluded.b2_path is not null then excluded.source_file\n    else coalesce(video_summaries.source_file, excluded.source_file)\n  end,\n  has_timestamps = coalesce(excluded.has_timestamps, false)\n                   or coalesce(video_summaries.has_timestamps, false),\n  summary_text = case\n    when $11::boolean = false and excluded.summary_text is not null\n      then excluded.summary_text\n    when video_summaries.summary_text is null then excluded.summary_text\n    else video_summaries.summary_text\n  end,\n  summary_embedding = case\n    when $11::boolean = false and excluded.summary_embedding is not null\n      then excluded.summary_embedding\n    when video_summaries.summary_embedding is null then excluded.summary_embedding\n    else video_summaries.summary_embedding\n  end,\n  topics = case\n    when excluded.topics is not null and array_length(excluded.topics, 1) > 0\n      then excluded.topics\n    else video_summaries.topics\n  end,\n  b2_path = coalesce(excluded.b2_path, video_summaries.b2_path),\n  thumbnail_b2_path = coalesce(\n    excluded.thumbnail_b2_path,\n    video_summaries.thumbnail_b2_path\n  ),\n  updated_at = now()\nreturning summary_id;",
+        "options": {
+          "queryReplacement": "={{ [\n  $json.client_id, $json.source_video_id, $json.title, $json.source_file,\n  $json.has_timestamps, $json.summary_text, $json.summary_embedding,\n  $json.topics, $json.b2_path, $json.thumbnail_b2_path, $json.is_auto_summary\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1200,
+        2112
+      ],
+      "id": "31fa223d-1547-5048-a5e6-b1bde56a4b71",
+      "name": "Upsert Video Summary",
+      "credentials": {
+        "postgres": {
+          "id": "VTTgsAJGmour7OLv",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Resolve Ingestion Manifest').first().json.file_id }}",
+          "mode": "id"
+        },
+        "driveId": {
+          "__rl": true,
+          "value": "0ACr6EEWxb_V3Uk9PVA",
+          "mode": "list",
+          "cachedResultName": "Admin",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/0ACr6EEWxb_V3Uk9PVA"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $('Resolve Ingestion Manifest').first().json.done_folder_id }}",
+          "mode": "id"
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1872,
+        2112
+      ],
+      "id": "affe2236-3ce3-5f85-a1a9-515a561c9207",
+      "name": "Move File to Completed",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "0oZdbi7MJ9sBitgJ",
+          "name": "Google Drive account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -2400,
+        1840
+      ],
+      "id": "a4e9f32b-35ca-5c92-bc44-cbdec4c3784c",
+      "name": "Manual Run"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 50
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -2400,
+        2000
+      ],
+      "id": "329f32e4-5e22-5ca7-8292-818e4106bb00",
+      "name": "Scheduled Run"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select\n  c.client_id::text as client_id,\n  c.slug as client_slug,\n  c.display_name,\n  coalesce(c.drive_transcripts_intake_folder_id, '') as transcripts_intake_folder_id,\n  coalesce(c.drive_transcripts_completed_folder_id, '') as transcripts_done_folder_id,\n  coalesce(c.drive_summaries_intake_folder_id, '') as summaries_intake_folder_id,\n  coalesce(c.drive_summaries_completed_folder_id, '') as summaries_done_folder_id,\n  10::int as max_files_per_run\nfrom public.clients_registry c\nwhere c.status = 'active'\n  and (\n    (c.drive_transcripts_intake_folder_id is not null\n     and c.drive_transcripts_completed_folder_id is not null)\n    or\n    (c.drive_summaries_intake_folder_id is not null\n     and c.drive_summaries_completed_folder_id is not null)\n  )\norder by lower(c.display_name), c.client_id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -2176,
+        1920
+      ],
+      "id": "a3212a6a-f97d-5f40-99d2-de313b0bf0fd",
+      "name": "Load Active Workspaces",
+      "credentials": {
+        "postgres": {
+          "id": "VTTgsAJGmour7OLv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1952,
+        1920
+      ],
+      "id": "913c0fd7-9efd-5fb4-bc57-252361959e93",
+      "name": "Loop Over Workspaces"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d007aa7d-9f4f-5b23-b470-716a84d54707",
+              "leftValue": "={{ $json.no_files !== true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "cdcb81c5-e717-56d6-9d39-8a39eaee231a",
+      "name": "Workspace Has Files?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -928,
+        1920
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select\n  coalesce(m.client_id, $1::uuid)::text as client_id,\n  coalesce(nullif(m.source_video_id, ''), $2::text) as source_video_id,\n  coalesce(nullif(m.title, ''), $3::text) as title,\n  coalesce(nullif(m.source_file, ''), $4::text) as source_file,\n  m.b2_bucket,\n  m.b2_path,\n  m.thumbnail_b2_path,\n  case\n    when m.transcript_drive_file_id = $5::text then 'transcripts'\n    when m.summary_drive_file_id = $5::text then 'summaries'\n    else $6::text\n  end as ingestion_type,\n  $5::text as file_id,\n  $7::text as file_name,\n  nullif($8::text, '') as file_size,\n  nullif($9::text, '') as file_mime_type,\n  nullif($10::text, '') as created_time,\n  case\n    when m.transcript_drive_file_id = $5::text then nullif($11::text, '')\n    when m.summary_drive_file_id = $5::text then nullif($12::text, '')\n    else nullif($13::text, '')\n  end as done_folder_id,\n  (m.manifest_id is not null) as manifest_found\nfrom (select 1) anchor\nleft join lateral (\n  select *\n  from public.ingestion_manifests\n  where transcript_drive_file_id = $5::text\n     or summary_drive_file_id = $5::text\n     or (client_id = $1::uuid and source_video_id = $2::text)\n  order by\n    case when transcript_drive_file_id = $5::text\n           or summary_drive_file_id = $5::text then 0 else 1 end,\n    updated_at desc\n  limit 1\n) m on true;",
+        "options": {
+          "queryReplacement": "={{ [\n  $('Extract File Identity').first().json.client_id,\n  $('Extract File Identity').first().json.source_video_id,\n  $('Extract File Identity').first().json.title,\n  $('Extract File Identity').first().json.source_file,\n  $('Extract File Identity').first().json.file_id,\n  $('Extract File Identity').first().json.ingestion_type,\n  $('Extract File Identity').first().json.file_name,\n  $('Extract File Identity').first().json.file_size || '',\n  $('Extract File Identity').first().json.file_mime_type || '',\n  $('Extract File Identity').first().json.created_time || '',\n  $('Extract File Identity').first().json.transcripts_done_folder_id || '',\n  $('Extract File Identity').first().json.summaries_done_folder_id || '',\n  $('Extract File Identity').first().json.done_folder_id || ''\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -144,
+        2112
+      ],
+      "id": "d7a8bfe7-3dbc-585f-bf71-695564bb0f95",
+      "name": "Resolve Ingestion Manifest",
+      "credentials": {
+        "postgres": {
+          "id": "VTTgsAJGmour7OLv",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into public.ingestion_manifests (\n  idempotency_key, client_id, source_video_id, title, source_file,\n  b2_bucket, b2_path, thumbnail_b2_path,\n  transcript_drive_file_id, summary_drive_file_id, status, error\n)\nvalues (\n  'drive-index:' || $1::text || ':' || $2::text,\n  $1::uuid, $2::text, $3::text, $4::text,\n  nullif($5::text, ''), nullif($6::text, ''), nullif($7::text, ''),\n  case when $8::text = 'transcripts' then $9::text else null end,\n  case when $8::text = 'summaries' then $9::text else null end,\n  'completed', null\n)\non conflict (client_id, source_video_id) do update set\n  title = coalesce(nullif(ingestion_manifests.title, ''), excluded.title),\n  source_file = coalesce(\n    nullif(ingestion_manifests.source_file, ''),\n    excluded.source_file\n  ),\n  b2_bucket = coalesce(ingestion_manifests.b2_bucket, excluded.b2_bucket),\n  b2_path = coalesce(ingestion_manifests.b2_path, excluded.b2_path),\n  thumbnail_b2_path = coalesce(\n    ingestion_manifests.thumbnail_b2_path,\n    excluded.thumbnail_b2_path\n  ),\n  transcript_drive_file_id = case\n    when $8::text = 'transcripts' then $9::text\n    else ingestion_manifests.transcript_drive_file_id\n  end,\n  summary_drive_file_id = case\n    when $8::text = 'summaries' then $9::text\n    else ingestion_manifests.summary_drive_file_id\n  end,\n  status = 'completed',\n  error = null,\n  updated_at = now()\nreturning manifest_id;",
+        "options": {
+          "queryReplacement": "={{ [\n  $('Format Embeddings').first().json.client_id,\n  $('Format Embeddings').first().json.source_video_id,\n  $('Format Embeddings').first().json.title,\n  $('Format Embeddings').first().json.source_file,\n  $('Format Embeddings').first().json.b2_bucket || '',\n  $('Format Embeddings').first().json.b2_path || '',\n  $('Format Embeddings').first().json.thumbnail_b2_path || '',\n  $('Format Embeddings').first().json.ingestion_type,\n  $('Format Embeddings').first().json.file_id\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1648,
+        2112
+      ],
+      "id": "3ec57f1d-2d30-5cb7-b75e-6afbdd5187de",
+      "name": "Record Drive Artifact",
+      "credentials": {
+        "postgres": {
+          "id": "VTTgsAJGmour7OLv",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    }
+  ],
+  "connections": {
+    "Manual Run": {
+      "main": [
+        [
+          {
+            "node": "Load Active Workspaces",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scheduled Run": {
+      "main": [
+        [
+          {
+            "node": "Load Active Workspaces",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Active Workspaces": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Workspaces",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Workspaces": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Find transcript files",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Find summary files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find transcript files": {
+      "main": [
+        [
+          {
+            "node": "tag transcript files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find summary files": {
+      "main": [
+        [
+          {
+            "node": "tag summary files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tag transcript files": {
+      "main": [
+        [
+          {
+            "node": "Merge intake",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tag summary files": {
+      "main": [
+        [
+          {
+            "node": "Merge intake",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge intake": {
+      "main": [
+        [
+          {
+            "node": "Sort Files Oldest First",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sort Files Oldest First": {
+      "main": [
+        [
+          {
+            "node": "Workspace Has Files?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workspace Has Files?": {
+      "main": [
+        [
+          {
+            "node": "Limit Workspace Batch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Workspaces",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit Workspace Batch": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Files": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Workspaces",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract File Identity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract File Identity": {
+      "main": [
+        [
+          {
+            "node": "Resolve Ingestion Manifest",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Ingestion Manifest": {
+      "main": [
+        [
+          {
+            "node": "Download Drive File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Drive File": {
+      "main": [
+        [
+          {
+            "node": "Extract Text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Text": {
+      "main": [
+        [
+          {
+            "node": "Prepare Content",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Content": {
+      "main": [
+        [
+          {
+            "node": "Create Embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Embeddings": {
+      "main": [
+        [
+          {
+            "node": "Format Embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Embeddings": {
+      "main": [
+        [
+          {
+            "node": "Upsert Video Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Video Summary": {
+      "main": [
+        [
+          {
+            "node": "Write Transcript Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Transcript Chunks": {
+      "main": [
+        [
+          {
+            "node": "Record Drive Artifact",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Drive Artifact": {
+      "main": [
+        [
+          {
+            "node": "Move File to Completed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move File to Completed": {
+      "main": [
+        [
+          {
+            "node": "Log Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Success": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Failure Record": {
+      "main": [
+        [
+          {
+            "node": "Log Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Failure": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "active": false,
+  "tags": []
+}
