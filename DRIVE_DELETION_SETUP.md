@@ -45,6 +45,10 @@ was not moved to Trash.
 Keep the secret private. It belongs only in n8n and the Render backend—not in
 Vercel and not in any `NEXT_PUBLIC_` variable.
 
+If n8n automatically selects an unrelated Header Auth credential such as
+`HeyGen authenticator`, remove it. The deletion webhook must use only the new
+`VP Media Delete Webhook` credential; never reuse the HeyGen secret.
+
 ## 4. Test in n8n before activation
 
 Use a disposable Drive file because this test moves the file to Trash.

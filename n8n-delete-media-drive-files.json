@@ -27,10 +27,7 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "position": [-220, 0],
-      "webhookId": "delete-media-drive-files",
-      "credentials": {
-        "httpHeaderAuth": {"name": "VP Media Delete Webhook"}
-      }
+      "webhookId": "delete-media-drive-files"
     },
     {
       "parameters": {
