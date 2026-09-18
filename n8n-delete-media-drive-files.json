@@ -1,0 +1,73 @@
+{
+  "name": "VP Delete Media Drive Files",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "delete-media-drive-files",
+        "authentication": "headerAuth",
+        "responseMode": "lastNode",
+        "responseData": "firstEntryJson",
+        "options": {}
+      },
+      "id": "876b47b1-d3e0-49b7-a083-739a57331820",
+      "name": "Delete Media Drive Files",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-420, 0],
+      "webhookId": "delete-media-drive-files",
+      "credentials": {
+        "httpHeaderAuth": {"name": "VP Media Delete Webhook"}
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || {};\nconst incoming = Array.isArray(body.file_ids) ? body.file_ids : [];\nconst fileIds = [...new Set(incoming.map(value => String(value || '').trim()).filter(Boolean))];\nif (fileIds.length === 0) {\n  throw new Error('file_ids must contain at least one Google Drive file ID');\n}\nif (fileIds.length > 200) {\n  throw new Error('At most 200 Google Drive files may be removed per request');\n}\nconst validId = /^[A-Za-z0-9_-]{10,200}$/;\nfor (const fileId of fileIds) {\n  if (!validId.test(fileId)) throw new Error('Invalid Google Drive file ID');\n}\nreturn fileIds.map(fileId => ({ json: { file_id: fileId } }));"
+      },
+      "id": "78b87733-caa7-4c03-9740-b44d575b827f",
+      "name": "Validate Delete Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-160, 0]
+    },
+    {
+      "parameters": {
+        "operation": "deleteFile",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.file_id }}",
+          "mode": "id"
+        },
+        "options": {"deletePermanently": false}
+      },
+      "id": "ffecb2af-352c-4bf0-abee-4f7d413dbe32",
+      "name": "Move File to Trash",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [100, 0],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {"name": "Google Drive account"}
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const fileIds = $('Validate Delete Request').all().map(item => item.json.file_id);\nreturn [{ json: { ok: true, trashed: fileIds.length, file_ids: fileIds } }];"
+      },
+      "id": "fba6802d-5fc3-4380-b294-c1c0a56952fa",
+      "name": "Confirm Drive Cleanup",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [360, 0]
+    }
+  ],
+  "connections": {
+    "Delete Media Drive Files": {"main": [[{"node": "Validate Delete Request", "type": "main", "index": 0}]]},
+    "Validate Delete Request": {"main": [[{"node": "Move File to Trash", "type": "main", "index": 0}]]},
+    "Move File to Trash": {"main": [[{"node": "Confirm Drive Cleanup", "type": "main", "index": 0}]]}
+  },
+  "pinData": {},
+  "settings": {"executionOrder": "v1"},
+  "active": false,
+  "tags": []
+}
