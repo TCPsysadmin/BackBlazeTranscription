@@ -3,18 +3,30 @@
   "nodes": [
     {
       "parameters": {
+        "content": "## Private media cleanup endpoint\n`POST /webhook/delete-media-drive-files`\n\n**Authentication:** Header Auth credential `VP Media Delete Webhook`\n\n**Body:**\n```json\n{ \"file_ids\": [\"transcript-file-id\", \"summary-file-id\"] }\n```\n\nUses the existing `Google Drive account` OAuth credential. Files are moved to Drive Trash, not permanently erased. The workflow retries transient Drive failures and only returns `{ ok: true }` after every requested file succeeds.",
+        "height": 380,
+        "width": 420,
+        "color": 4
+      },
+      "id": "6accc323-34d1-42d7-a139-a43139986cc3",
+      "name": "Setup Notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-700, -240]
+    },
+    {
+      "parameters": {
         "httpMethod": "POST",
         "path": "delete-media-drive-files",
         "authentication": "headerAuth",
-        "responseMode": "lastNode",
-        "responseData": "firstEntryJson",
+        "responseMode": "responseNode",
         "options": {}
       },
       "id": "876b47b1-d3e0-49b7-a083-739a57331820",
       "name": "Delete Media Drive Files",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
-      "position": [-420, 0],
+      "position": [-220, 0],
       "webhookId": "delete-media-drive-files",
       "credentials": {
         "httpHeaderAuth": {"name": "VP Media Delete Webhook"}
@@ -28,7 +40,7 @@
       "name": "Validate Delete Request",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-160, 0]
+      "position": [40, 0]
     },
     {
       "parameters": {
@@ -44,27 +56,46 @@
       "name": "Move File to Trash",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
-      "position": [100, 0],
+      "position": [300, 0],
       "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
       "credentials": {
-        "googleDriveOAuth2Api": {"name": "Google Drive account"}
+        "googleDriveOAuth2Api": {
+          "id": "0oZdbi7MJ9sBitgJ",
+          "name": "Google Drive account"
+        }
       }
     },
     {
       "parameters": {
-        "jsCode": "const fileIds = $('Validate Delete Request').all().map(item => item.json.file_id);\nreturn [{ json: { ok: true, trashed: fileIds.length, file_ids: fileIds } }];"
+        "jsCode": "const fileIds = $('Validate Delete Request').all().map(item => item.json.file_id);\nreturn [{ json: { ok: true, trashed: fileIds.length } }];"
       },
       "id": "fba6802d-5fc3-4380-b294-c1c0a56952fa",
       "name": "Confirm Drive Cleanup",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [360, 0]
+      "position": [560, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "3e8b9b90-1f2e-44f1-b272-d46880bd8370",
+      "name": "Respond: Drive Cleanup",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [820, 0]
     }
   ],
   "connections": {
     "Delete Media Drive Files": {"main": [[{"node": "Validate Delete Request", "type": "main", "index": 0}]]},
     "Validate Delete Request": {"main": [[{"node": "Move File to Trash", "type": "main", "index": 0}]]},
-    "Move File to Trash": {"main": [[{"node": "Confirm Drive Cleanup", "type": "main", "index": 0}]]}
+    "Move File to Trash": {"main": [[{"node": "Confirm Drive Cleanup", "type": "main", "index": 0}]]},
+    "Confirm Drive Cleanup": {"main": [[{"node": "Respond: Drive Cleanup", "type": "main", "index": 0}]]}
   },
   "pinData": {},
   "settings": {"executionOrder": "v1"},
