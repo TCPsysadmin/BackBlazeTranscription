@@ -42,10 +42,14 @@ WORKSPACE_QUERY = """select
   c.client_id::text as client_id,
   c.slug as client_slug,
   c.display_name,
-  coalesce(c.drive_transcripts_intake_folder_id, '') as transcripts_intake_folder_id,
-  coalesce(c.drive_transcripts_completed_folder_id, '') as transcripts_done_folder_id,
-  coalesce(c.drive_summaries_intake_folder_id, '') as summaries_intake_folder_id,
-  coalesce(c.drive_summaries_completed_folder_id, '') as summaries_done_folder_id,
+  replace(coalesce(c.drive_transcripts_intake_folder_id, ''), E'\\\\_', '_')
+    as transcripts_intake_folder_id,
+  replace(coalesce(c.drive_transcripts_completed_folder_id, ''), E'\\\\_', '_')
+    as transcripts_done_folder_id,
+  replace(coalesce(c.drive_summaries_intake_folder_id, ''), E'\\\\_', '_')
+    as summaries_intake_folder_id,
+  replace(coalesce(c.drive_summaries_completed_folder_id, ''), E'\\\\_', '_')
+    as summaries_done_folder_id,
   10::int as max_files_per_run
 from public.clients_registry c
 where c.status = 'active'
@@ -189,6 +193,33 @@ on conflict (client_id, source_video_id) do update set
   updated_at = now()
 returning manifest_id;"""
 
+SUMMARY_QUERY = """select
+  $1::text as execution_id,
+  case
+    when count(*) filter (where status = 'failed') > 0 then 'completed_with_errors'
+    when count(*) filter (where status = 'succeeded') > 0 then 'completed'
+    else 'no_files_processed'
+  end as result,
+  count(*) filter (where status = 'succeeded')::int as files_ingested,
+  count(*) filter (where status = 'failed')::int as files_failed,
+  coalesce(
+    jsonb_agg(payload->>'file_name' order by finished_at)
+      filter (where status = 'succeeded'),
+    '[]'::jsonb
+  ) as ingested_files,
+  coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'file_name', payload->>'file_name',
+        'error', error
+      ) order by finished_at
+    ) filter (where status = 'failed'),
+    '[]'::jsonb
+  ) as failed_files
+from public.job_runs
+where kind = 'ingest'
+  and payload->>'execution_id' = $1::text;"""
+
 
 def stable_id(label: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"vp-consolidated-ingestion/{label}"))
@@ -278,7 +309,7 @@ def build(source: Path, output: Path) -> None:
     nodes.extend([manual, schedule, load_workspaces, workspace_loop])
 
     renames = {
-        "Sort files oldest first1": "Sort Files Oldest First",
+        "Sort files oldest first1": "Sort Files Newest First",
         "Limit1": "Limit Workspace Batch",
         "Loop Over Items2": "Loop Over Files",
         "Extract Identity of File1": "Extract File Identity",
@@ -311,18 +342,33 @@ def build(source: Path, output: Path) -> None:
     ):
         node = node_by_name(nodes, name)
         node["parameters"]["filter"]["folderId"]["value"] = (
-            f"={{ $('Loop Over Workspaces').item.json.{folder_field} || 'UNCONFIGURED' }}"
+            "={{ $('Loop Over Workspaces').item.json."
+            + folder_field
+            + " || 'UNCONFIGURED' }}"
         )
         node["onError"] = "continueRegularOutput"
         node["alwaysOutputData"] = True
 
     tag_code = r"""const cfg = $('Loop Over Workspaces').item.json;
 const folderId = cfg.%s;
+const sourceBranch = '%s';
 if (!folderId) return [];
 const all = $input.all().map(item => item.json || {});
 const failed = all.find(file => file.error && !file.id);
 if (failed) {
-  throw new Error(`Drive search failed for ${folderId}: ` + JSON.stringify(failed.error).slice(0, 300));
+  // Log this as a failed queue item without blocking the other workspaces.
+  return [{ json: {
+    drive_search_error: JSON.stringify(failed.error).slice(0, 1000),
+    file_id: `drive-search-error:${cfg.client_id}:${sourceBranch}`,
+    file_name: `[Drive search failed: ${cfg.display_name} / ${sourceBranch}]`,
+    created_time: new Date().toISOString(),
+    client_id: cfg.client_id,
+    client_slug: cfg.client_slug,
+    transcripts_done_folder_id: cfg.transcripts_done_folder_id,
+    summaries_done_folder_id: cfg.summaries_done_folder_id,
+    max_files_per_run: cfg.max_files_per_run,
+    source_branch: sourceBranch
+  }, pairedItem: { item: 0 } }];
 }
 const textFile = /\.(txt|md)$/i;
 return all
@@ -335,13 +381,13 @@ return all
     file_name: file.name,
     file_size: file.size ?? null,
     file_mime_type: file.mimeType,
-    created_time: file.createdTime,
+    created_time: file.createdTime || file.modifiedTime || null,
     client_id: cfg.client_id,
     client_slug: cfg.client_slug,
     transcripts_done_folder_id: cfg.transcripts_done_folder_id,
     summaries_done_folder_id: cfg.summaries_done_folder_id,
     max_files_per_run: cfg.max_files_per_run,
-    source_branch: '%s'
+    source_branch: sourceBranch
   }, pairedItem: { item: 0 } }));"""
     node_by_name(nodes, "tag transcript files")["parameters"]["jsCode"] = tag_code % (
         "transcripts_intake_folder_id",
@@ -356,11 +402,28 @@ return all
         "={{ $json.max_files_per_run || 10 }}"
     )
 
-    sorter = node_by_name(nodes, "Sort Files Oldest First")
-    sorter["parameters"]["jsCode"] = sorter["parameters"]["jsCode"].replace(
-        "if (files.length === 0) {\n  return [];\n}",
-        "if (files.length === 0) {\n  return [{ json: { no_files: true } }];\n}",
-    )
+    sorter = node_by_name(nodes, "Sort Files Newest First")
+    sorter["parameters"]["jsCode"] = r"""// Search returns every direct child from BOTH intake folders. Prioritize
+// recent uploads before the per-workspace Limit node so an old backlog or a
+// repeatedly failing legacy file cannot prevent a new transcript/summary pair
+// from being ingested.
+const files = $input.all()
+  .map(i => i.json)
+  .filter(f => f && f.file_id);
+
+if (files.length === 0) {
+  return [{ json: { no_files: true } }];
+}
+
+const timestamp = (file) => {
+  const parsed = Date.parse(file.created_time || '');
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+return files
+  .sort((a, b) => timestamp(b) - timestamp(a))
+  .map(f => ({ json: f, pairedItem: { item: 0 } }));
+"""
 
     has_files = {
         "parameters": {
@@ -410,6 +473,17 @@ return all
     identity["parameters"]["jsCode"] = identity["parameters"]["jsCode"].replace(
         "failed_folder_id: cfg.failed_folder_id || null,",
         "failed_folder_id: null,",
+    )
+    identity["parameters"]["jsCode"] = identity["parameters"]["jsCode"].replace(
+        "const cfg = meta;",
+        "const cfg = meta;\n\n"
+        "if (meta.drive_search_error) {\n"
+        "  return [{ json: {\n"
+        "    ...meta,\n"
+        "    ingestion_type: meta.source_branch,\n"
+        "    error: `Drive search failed: ${meta.drive_search_error}`\n"
+        "  }, pairedItem: { item: 0 } }];\n"
+        "}",
     )
 
     prepare = node_by_name(nodes, "Prepare Content")
@@ -554,13 +628,77 @@ let message;
 try { message = typeof raw === 'string' ? raw : JSON.stringify(raw); }
 catch (_) { message = String(raw); }
 return [{ json: {
-  client_id: meta.client_id || original.client_id || null,
-  file_id: meta.file_id || original.file_id || null,
-  file_name: meta.file_name || original.file_name || null,
-  source_video_id: meta.source_video_id || original.source_video_id || null,
-  ingestion_type: meta.ingestion_type || original.ingestion_type || null,
+  client_id: original.client_id || meta.client_id || null,
+  file_id: original.file_id || meta.file_id || null,
+  file_name: original.file_name || meta.file_name || null,
+  source_video_id: original.source_video_id || meta.source_video_id || null,
+  ingestion_type: original.ingestion_type || meta.ingestion_type || null,
   error: message.slice(0, 2000)
 }, pairedItem: { item: 0 } }];"""
+
+    success_log = node_by_name(nodes, "Log Success")
+    success_replacements = success_log["parameters"]["options"][
+        "queryReplacement"
+    ]
+    success_log["parameters"]["options"]["queryReplacement"] = (
+        success_replacements.replace(
+            "JSON.stringify({\n    file_id:",
+            "JSON.stringify({\n    execution_id: $execution.id,\n    file_id:",
+        )
+    )
+
+    failure_log = node_by_name(nodes, "Log Failure")
+    failure_replacements = failure_log["parameters"]["options"][
+        "queryReplacement"
+    ]
+    failure_log["parameters"]["options"]["queryReplacement"] = (
+        failure_replacements.replace(
+            "JSON.stringify({\n    file_id:",
+            "JSON.stringify({\n    execution_id: $execution.id,\n    file_id:",
+        )
+    )
+
+    execution_summary = postgres_node(
+        postgres_template,
+        "Execution Summary",
+        [-1712, 1632],
+        SUMMARY_QUERY,
+        "={{ [$execution.id] }}",
+    )
+    nodes.append(execution_summary)
+
+    drive_search_succeeded = {
+        "parameters": {
+            "conditions": {
+                "options": {
+                    "caseSensitive": True,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 3,
+                },
+                "conditions": [
+                    {
+                        "id": stable_id("condition/drive-search-succeeded"),
+                        "leftValue": "={{ !$json.drive_search_error }}",
+                        "rightValue": True,
+                        "operator": {
+                            "type": "boolean",
+                            "operation": "true",
+                            "singleValue": True,
+                        },
+                    }
+                ],
+                "combinator": "and",
+            },
+            "options": {},
+        },
+        "id": stable_id("Drive Search Succeeded?"),
+        "name": "Drive Search Succeeded?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [-256, 2240],
+    }
+    nodes.append(drive_search_succeeded)
 
     # One explicit graph. Split-in-batches output 0 is "done" and output 1 is
     # the current loop item in the n8n version used by the existing workflow.
@@ -569,14 +707,17 @@ return [{ json: {
         "Scheduled Run": {"main": [[edge("Load Active Workspaces")]]},
         "Load Active Workspaces": {"main": [[edge("Loop Over Workspaces")]]},
         "Loop Over Workspaces": {
-            "main": [[], [edge("Find transcript files"), edge("Find summary files")]]
+            "main": [
+                [edge("Execution Summary")],
+                [edge("Find transcript files"), edge("Find summary files")],
+            ]
         },
         "Find transcript files": {"main": [[edge("tag transcript files")]]},
         "Find summary files": {"main": [[edge("tag summary files")]]},
         "tag transcript files": {"main": [[edge("Merge intake", 0)]]},
         "tag summary files": {"main": [[edge("Merge intake", 1)]]},
-        "Merge intake": {"main": [[edge("Sort Files Oldest First")]]},
-        "Sort Files Oldest First": {"main": [[edge("Workspace Has Files?")]]},
+        "Merge intake": {"main": [[edge("Sort Files Newest First")]]},
+        "Sort Files Newest First": {"main": [[edge("Workspace Has Files?")]]},
         "Workspace Has Files?": {
             "main": [
                 [edge("Limit Workspace Batch")],
@@ -588,6 +729,12 @@ return [{ json: {
             "main": [[edge("Loop Over Workspaces")], [edge("Extract File Identity")]]
         },
         "Extract File Identity": {
+            "main": [
+                [edge("Drive Search Succeeded?")],
+                [edge("Build Failure Record")],
+            ]
+        },
+        "Drive Search Succeeded?": {
             "main": [
                 [edge("Resolve Ingestion Manifest")],
                 [edge("Build Failure Record")],
@@ -634,11 +781,12 @@ return [{ json: {
         "tag transcript files": [-1488, 1840],
         "tag summary files": [-1488, 2080],
         "Merge intake": [-1264, 1920],
-        "Sort Files Oldest First": [-1040, 1920],
+        "Sort Files Newest First": [-1040, 1920],
         "Workspace Has Files?": [-928, 1920],
         "Limit Workspace Batch": [-816, 1920],
         "Loop Over Files": [-592, 1920],
         "Extract File Identity": [-368, 2112],
+        "Drive Search Succeeded?": [-256, 2240],
         "Resolve Ingestion Manifest": [-144, 2112],
         "Download Drive File": [80, 2112],
         "Extract Text": [304, 2112],
@@ -652,6 +800,7 @@ return [{ json: {
         "Log Success": [2096, 2112],
         "Build Failure Record": [1200, 2448],
         "Log Failure": [1424, 2448],
+        "Execution Summary": [-1712, 1632],
     }
     for node in nodes:
         if node["name"] in positions:

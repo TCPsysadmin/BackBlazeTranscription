@@ -8,7 +8,10 @@ the manual tests below pass.
 
 - Loads every active, configured workspace from `public.clients_registry`.
 - Polls each workspace's transcript and summary intake folders.
-- Processes at most 10 oldest files per workspace per scheduled run.
+- Processes at most 10 newest files per workspace per scheduled run so fresh
+  uploads are not blocked by an old or repeatedly failing intake file.
+- Ends at `Execution Summary` with exact counts and filenames for files
+  ingested or failed during that n8n execution.
 - Detects transcript versus summary from the filename, including
   `_SummaryPlaud`.
 - Resolves the existing `ingestion_manifests` record before indexing so B2

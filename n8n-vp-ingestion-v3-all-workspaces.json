@@ -8,7 +8,7 @@
         "filter": {
           "folderId": {
             "__rl": true,
-            "value": "={ $('Loop Over Workspaces').item.json.transcripts_intake_folder_id || 'UNCONFIGURED' }",
+            "value": "={{ $('Loop Over Workspaces').item.json.transcripts_intake_folder_id || 'UNCONFIGURED' }}",
             "mode": "id"
           }
         },
@@ -38,7 +38,7 @@
         "filter": {
           "folderId": {
             "__rl": true,
-            "value": "={ $('Loop Over Workspaces').item.json.summaries_intake_folder_id || 'UNCONFIGURED' }",
+            "value": "={{ $('Loop Over Workspaces').item.json.summaries_intake_folder_id || 'UNCONFIGURED' }}",
             "mode": "id"
           }
         },
@@ -63,7 +63,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const cfg = $('Loop Over Workspaces').item.json;\nconst folderId = cfg.transcripts_intake_folder_id;\nif (!folderId) return [];\nconst all = $input.all().map(item => item.json || {});\nconst failed = all.find(file => file.error && !file.id);\nif (failed) {\n  throw new Error(`Drive search failed for ${folderId}: ` + JSON.stringify(failed.error).slice(0, 300));\n}\nconst textFile = /\\.(txt|md)$/i;\nreturn all\n  .filter(file => file.id && file.mimeType !== 'application/vnd.google-apps.folder' && (\n    textFile.test(file.name || '') || file.mimeType === 'text/plain' ||\n    file.mimeType === 'application/vnd.google-apps.document'\n  ))\n  .map(file => ({ json: {\n    file_id: file.id,\n    file_name: file.name,\n    file_size: file.size ?? null,\n    file_mime_type: file.mimeType,\n    created_time: file.createdTime,\n    client_id: cfg.client_id,\n    client_slug: cfg.client_slug,\n    transcripts_done_folder_id: cfg.transcripts_done_folder_id,\n    summaries_done_folder_id: cfg.summaries_done_folder_id,\n    max_files_per_run: cfg.max_files_per_run,\n    source_branch: 'transcripts'\n  }, pairedItem: { item: 0 } }));"
+        "jsCode": "const cfg = $('Loop Over Workspaces').item.json;\nconst folderId = cfg.transcripts_intake_folder_id;\nconst sourceBranch = 'transcripts';\nif (!folderId) return [];\nconst all = $input.all().map(item => item.json || {});\nconst failed = all.find(file => file.error && !file.id);\nif (failed) {\n  // Log this as a failed queue item without blocking the other workspaces.\n  return [{ json: {\n    drive_search_error: JSON.stringify(failed.error).slice(0, 1000),\n    file_id: `drive-search-error:${cfg.client_id}:${sourceBranch}`,\n    file_name: `[Drive search failed: ${cfg.display_name} / ${sourceBranch}]`,\n    created_time: new Date().toISOString(),\n    client_id: cfg.client_id,\n    client_slug: cfg.client_slug,\n    transcripts_done_folder_id: cfg.transcripts_done_folder_id,\n    summaries_done_folder_id: cfg.summaries_done_folder_id,\n    max_files_per_run: cfg.max_files_per_run,\n    source_branch: sourceBranch\n  }, pairedItem: { item: 0 } }];\n}\nconst textFile = /\\.(txt|md)$/i;\nreturn all\n  .filter(file => file.id && file.mimeType !== 'application/vnd.google-apps.folder' && (\n    textFile.test(file.name || '') || file.mimeType === 'text/plain' ||\n    file.mimeType === 'application/vnd.google-apps.document'\n  ))\n  .map(file => ({ json: {\n    file_id: file.id,\n    file_name: file.name,\n    file_size: file.size ?? null,\n    file_mime_type: file.mimeType,\n    created_time: file.createdTime || file.modifiedTime || null,\n    client_id: cfg.client_id,\n    client_slug: cfg.client_slug,\n    transcripts_done_folder_id: cfg.transcripts_done_folder_id,\n    summaries_done_folder_id: cfg.summaries_done_folder_id,\n    max_files_per_run: cfg.max_files_per_run,\n    source_branch: sourceBranch\n  }, pairedItem: { item: 0 } }));"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -77,7 +77,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const cfg = $('Loop Over Workspaces').item.json;\nconst folderId = cfg.summaries_intake_folder_id;\nif (!folderId) return [];\nconst all = $input.all().map(item => item.json || {});\nconst failed = all.find(file => file.error && !file.id);\nif (failed) {\n  throw new Error(`Drive search failed for ${folderId}: ` + JSON.stringify(failed.error).slice(0, 300));\n}\nconst textFile = /\\.(txt|md)$/i;\nreturn all\n  .filter(file => file.id && file.mimeType !== 'application/vnd.google-apps.folder' && (\n    textFile.test(file.name || '') || file.mimeType === 'text/plain' ||\n    file.mimeType === 'application/vnd.google-apps.document'\n  ))\n  .map(file => ({ json: {\n    file_id: file.id,\n    file_name: file.name,\n    file_size: file.size ?? null,\n    file_mime_type: file.mimeType,\n    created_time: file.createdTime,\n    client_id: cfg.client_id,\n    client_slug: cfg.client_slug,\n    transcripts_done_folder_id: cfg.transcripts_done_folder_id,\n    summaries_done_folder_id: cfg.summaries_done_folder_id,\n    max_files_per_run: cfg.max_files_per_run,\n    source_branch: 'summaries'\n  }, pairedItem: { item: 0 } }));"
+        "jsCode": "const cfg = $('Loop Over Workspaces').item.json;\nconst folderId = cfg.summaries_intake_folder_id;\nconst sourceBranch = 'summaries';\nif (!folderId) return [];\nconst all = $input.all().map(item => item.json || {});\nconst failed = all.find(file => file.error && !file.id);\nif (failed) {\n  // Log this as a failed queue item without blocking the other workspaces.\n  return [{ json: {\n    drive_search_error: JSON.stringify(failed.error).slice(0, 1000),\n    file_id: `drive-search-error:${cfg.client_id}:${sourceBranch}`,\n    file_name: `[Drive search failed: ${cfg.display_name} / ${sourceBranch}]`,\n    created_time: new Date().toISOString(),\n    client_id: cfg.client_id,\n    client_slug: cfg.client_slug,\n    transcripts_done_folder_id: cfg.transcripts_done_folder_id,\n    summaries_done_folder_id: cfg.summaries_done_folder_id,\n    max_files_per_run: cfg.max_files_per_run,\n    source_branch: sourceBranch\n  }, pairedItem: { item: 0 } }];\n}\nconst textFile = /\\.(txt|md)$/i;\nreturn all\n  .filter(file => file.id && file.mimeType !== 'application/vnd.google-apps.folder' && (\n    textFile.test(file.name || '') || file.mimeType === 'text/plain' ||\n    file.mimeType === 'application/vnd.google-apps.document'\n  ))\n  .map(file => ({ json: {\n    file_id: file.id,\n    file_name: file.name,\n    file_size: file.size ?? null,\n    file_mime_type: file.mimeType,\n    created_time: file.createdTime || file.modifiedTime || null,\n    client_id: cfg.client_id,\n    client_slug: cfg.client_slug,\n    transcripts_done_folder_id: cfg.transcripts_done_folder_id,\n    summaries_done_folder_id: cfg.summaries_done_folder_id,\n    max_files_per_run: cfg.max_files_per_run,\n    source_branch: sourceBranch\n  }, pairedItem: { item: 0 } }));"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -161,7 +161,7 @@
         "operation": "executeQuery",
         "query": "insert into public.job_runs\n  (client_id, kind, status, started_at, finished_at, payload)\nvalues ($1::uuid, 'ingest', 'succeeded', now(), now(), $2::jsonb)\nreturning job_run_id;",
         "options": {
-          "queryReplacement": "={{ [\n  $('Resolve Ingestion Manifest').first().json.client_id,\n  JSON.stringify({\n    file_id:              $('Resolve Ingestion Manifest').first().json.file_id,\n    file_name:            $('Resolve Ingestion Manifest').first().json.file_name,\n    source_video_id:      $('Resolve Ingestion Manifest').first().json.source_video_id,\n    ingestion_type:       $('Resolve Ingestion Manifest').first().json.ingestion_type,\n    has_timestamps:       $('Format Embeddings').first().json.has_timestamps,\n    chunks_expected:      $('Format Embeddings').first().json.chunk_count,\n    chunks_written:       $json.chunks_written,\n    stale_chunks_removed: $json.stale_chunks_removed\n  })\n] }}"
+          "queryReplacement": "={{ [\n  $('Resolve Ingestion Manifest').first().json.client_id,\n  JSON.stringify({\n    execution_id: $execution.id,\n    file_id:              $('Resolve Ingestion Manifest').first().json.file_id,\n    file_name:            $('Resolve Ingestion Manifest').first().json.file_name,\n    source_video_id:      $('Resolve Ingestion Manifest').first().json.source_video_id,\n    ingestion_type:       $('Resolve Ingestion Manifest').first().json.ingestion_type,\n    has_timestamps:       $('Format Embeddings').first().json.has_timestamps,\n    chunks_expected:      $('Format Embeddings').first().json.chunk_count,\n    chunks_written:       $json.chunks_written,\n    stale_chunks_removed: $json.stale_chunks_removed\n  })\n] }}"
         }
       },
       "type": "n8n-nodes-base.postgres",
@@ -182,7 +182,7 @@
     },
     {
       "parameters": {
-        "jsCode": "let meta = {};\ntry { meta = $('Resolve Ingestion Manifest').first().json || {}; }\ncatch (_) {\n  try { meta = $('Extract File Identity').first().json || {}; } catch (_) {}\n}\nconst incoming = $input.first().json || {};\nconst original = incoming.json || incoming.item || incoming;\nconst raw = incoming.error || incoming.message || original.error || 'Unknown ingestion error';\nlet message;\ntry { message = typeof raw === 'string' ? raw : JSON.stringify(raw); }\ncatch (_) { message = String(raw); }\nreturn [{ json: {\n  client_id: meta.client_id || original.client_id || null,\n  file_id: meta.file_id || original.file_id || null,\n  file_name: meta.file_name || original.file_name || null,\n  source_video_id: meta.source_video_id || original.source_video_id || null,\n  ingestion_type: meta.ingestion_type || original.ingestion_type || null,\n  error: message.slice(0, 2000)\n}, pairedItem: { item: 0 } }];"
+        "jsCode": "let meta = {};\ntry { meta = $('Resolve Ingestion Manifest').first().json || {}; }\ncatch (_) {\n  try { meta = $('Extract File Identity').first().json || {}; } catch (_) {}\n}\nconst incoming = $input.first().json || {};\nconst original = incoming.json || incoming.item || incoming;\nconst raw = incoming.error || incoming.message || original.error || 'Unknown ingestion error';\nlet message;\ntry { message = typeof raw === 'string' ? raw : JSON.stringify(raw); }\ncatch (_) { message = String(raw); }\nreturn [{ json: {\n  client_id: original.client_id || meta.client_id || null,\n  file_id: original.file_id || meta.file_id || null,\n  file_name: original.file_name || meta.file_name || null,\n  source_video_id: original.source_video_id || meta.source_video_id || null,\n  ingestion_type: original.ingestion_type || meta.ingestion_type || null,\n  error: message.slice(0, 2000)\n}, pairedItem: { item: 0 } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -198,7 +198,7 @@
         "operation": "executeQuery",
         "query": "insert into public.job_runs\n  (client_id, kind, status, started_at, finished_at, error, payload)\nvalues ($1::uuid, 'ingest', 'failed', now(), now(), $2::text, $3::jsonb)\nreturning job_run_id;",
         "options": {
-          "queryReplacement": "={{ [\n  $json.client_id,\n  $json.error,\n  JSON.stringify({\n    file_id:         $json.file_id,\n    file_name:       $json.file_name,\n    source_video_id: $json.source_video_id,\n    ingestion_type:  $json.ingestion_type\n  })\n] }}"
+          "queryReplacement": "={{ [\n  $json.client_id,\n  $json.error,\n  JSON.stringify({\n    execution_id: $execution.id,\n    file_id:         $json.file_id,\n    file_name:       $json.file_name,\n    source_video_id: $json.source_video_id,\n    ingestion_type:  $json.ingestion_type\n  })\n] }}"
         }
       },
       "type": "n8n-nodes-base.postgres",
@@ -219,7 +219,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Sorts across BOTH intake branches, before the Limit node. The old order was\n// Search -> Limit -> Sort, which limited first and therefore never actually\n// processed the backlog oldest-first.\nconst files = $input.all()\n  .map(i => i.json)\n  .filter(f => f && f.file_id);\n\nif (files.length === 0) {\n  return [{ json: { no_files: true } }];\n}\n\nreturn files\n  .sort((a, b) => new Date(a.created_time) - new Date(b.created_time))\n  .map(f => ({ json: f, pairedItem: { item: 0 } }));\n"
+        "jsCode": "// Search returns every direct child from BOTH intake folders. Prioritize\n// recent uploads before the per-workspace Limit node so an old backlog or a\n// repeatedly failing legacy file cannot prevent a new transcript/summary pair\n// from being ingested.\nconst files = $input.all()\n  .map(i => i.json)\n  .filter(f => f && f.file_id);\n\nif (files.length === 0) {\n  return [{ json: { no_files: true } }];\n}\n\nconst timestamp = (file) => {\n  const parsed = Date.parse(file.created_time || '');\n  return Number.isFinite(parsed) ? parsed : 0;\n};\n\nreturn files\n  .sort((a, b) => timestamp(b) - timestamp(a))\n  .map(f => ({ json: f, pairedItem: { item: 0 } }));\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -227,8 +227,8 @@
         -1040,
         1920
       ],
-      "id": "b98a65e7-3bc6-5594-9af5-1039d760df50",
-      "name": "Sort Files Oldest First"
+      "id": "d0e04c69-ab58-5a2c-bc6f-ffa626472373",
+      "name": "Sort Files Newest First"
     },
     {
       "parameters": {
@@ -258,7 +258,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Runs once per outer-loop iteration, BEFORE the download, so that a file that\n// fails to download or parse can still be named in the failure log.\nconst meta = $input.first().json;\nconst cfg = meta;\n\nconst base = String(meta.file_name || '').replace(/\\.(txt|md)$/i, '').trim();\nif (!base) {\n  throw new Error('File has no usable name');\n}\n\n// Decide the type from the FILE, not from a hand-edited workflow field.\n// This is what removes the manual transcripts/summaries switch: a mixed batch\n// now ingests correctly in a single run.\nconst isSummary = /[\\s\\-_]*(summary|summaryplaud)\\s*$/i.test(base);\nconst ingestionType = isSummary ? 'summaries' : 'transcripts';\n\n// Strip exactly ONE trailing type suffix. Gemini exports are genuinely named\n// \"<name>_transcript_transcript.txt\" -> id \"<name>_transcript\", which is what\n// is already in Supabase. Stripping more than one would split those videos.\n// \"_SummaryPlaud\" is included because it was not before -- that is why\n// \"PLANNING RAMBLE_SummaryPlaud\" landed as its own row instead of merging.\nconst sourceVideoId = base\n  .replace(/[\\s\\-_]*(transcript|summary|summaryplaud)\\s*$/i, '')\n  .trim();\n\n// Collapse separator runs. Without the second replace \"X_Y - SO WHAT\" became\n// \"X Y   SO WHAT\" (three spaces). HTML collapses that to one space on screen,\n// so VP prints the name correctly and then cannot find it again -- the backend\n// lookup was whitespace-exact. 269 of 275 stored titles hit this.\nconst title = sourceVideoId\n  .replace(/[-_]+/g, ' ')\n  .replace(/\\s+/g, ' ')\n  .trim();\n\n// Destination follows the DETECTED type, not the folder the file came from, so\n// a summary dropped in the transcripts intake still files itself correctly.\nconst doneFolderId =\n  (isSummary ? cfg.summaries_done_folder_id : cfg.transcripts_done_folder_id)\n  || meta.done_folder_id;\n\nif (!doneFolderId) {\n  throw new Error(\n    `No completed folder configured for ${ingestionType} ` +\n    `(configure the completed folder in public.clients_registry)`\n  );\n}\n\nreturn [{\n  json: {\n    ...meta,\n    client_id: cfg.client_id,\n    client_slug: cfg.client_slug,\n    ingestion_type: ingestionType,\n    source_video_id: sourceVideoId,\n    title,\n    source_file: `${sourceVideoId}.mp4`,\n    done_folder_id: doneFolderId,\n    failed_folder_id: null,\n  },\n  pairedItem: { item: 0 },\n}];\n"
+        "jsCode": "// Runs once per outer-loop iteration, BEFORE the download, so that a file that\n// fails to download or parse can still be named in the failure log.\nconst meta = $input.first().json;\nconst cfg = meta;\n\nif (meta.drive_search_error) {\n  return [{ json: {\n    ...meta,\n    ingestion_type: meta.source_branch,\n    error: `Drive search failed: ${meta.drive_search_error}`\n  }, pairedItem: { item: 0 } }];\n}\n\nconst base = String(meta.file_name || '').replace(/\\.(txt|md)$/i, '').trim();\nif (!base) {\n  throw new Error('File has no usable name');\n}\n\n// Decide the type from the FILE, not from a hand-edited workflow field.\n// This is what removes the manual transcripts/summaries switch: a mixed batch\n// now ingests correctly in a single run.\nconst isSummary = /[\\s\\-_]*(summary|summaryplaud)\\s*$/i.test(base);\nconst ingestionType = isSummary ? 'summaries' : 'transcripts';\n\n// Strip exactly ONE trailing type suffix. Gemini exports are genuinely named\n// \"<name>_transcript_transcript.txt\" -> id \"<name>_transcript\", which is what\n// is already in Supabase. Stripping more than one would split those videos.\n// \"_SummaryPlaud\" is included because it was not before -- that is why\n// \"PLANNING RAMBLE_SummaryPlaud\" landed as its own row instead of merging.\nconst sourceVideoId = base\n  .replace(/[\\s\\-_]*(transcript|summary|summaryplaud)\\s*$/i, '')\n  .trim();\n\n// Collapse separator runs. Without the second replace \"X_Y - SO WHAT\" became\n// \"X Y   SO WHAT\" (three spaces). HTML collapses that to one space on screen,\n// so VP prints the name correctly and then cannot find it again -- the backend\n// lookup was whitespace-exact. 269 of 275 stored titles hit this.\nconst title = sourceVideoId\n  .replace(/[-_]+/g, ' ')\n  .replace(/\\s+/g, ' ')\n  .trim();\n\n// Destination follows the DETECTED type, not the folder the file came from, so\n// a summary dropped in the transcripts intake still files itself correctly.\nconst doneFolderId =\n  (isSummary ? cfg.summaries_done_folder_id : cfg.transcripts_done_folder_id)\n  || meta.done_folder_id;\n\nif (!doneFolderId) {\n  throw new Error(\n    `No completed folder configured for ${ingestionType} ` +\n    `(configure the completed folder in public.clients_registry)`\n  );\n}\n\nreturn [{\n  json: {\n    ...meta,\n    client_id: cfg.client_id,\n    client_slug: cfg.client_slug,\n    ingestion_type: ingestionType,\n    source_video_id: sourceVideoId,\n    title,\n    source_file: `${sourceVideoId}.mp4`,\n    done_folder_id: doneFolderId,\n    failed_folder_id: null,\n  },\n  pairedItem: { item: 0 },\n}];\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -445,7 +445,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "select\n  c.client_id::text as client_id,\n  c.slug as client_slug,\n  c.display_name,\n  coalesce(c.drive_transcripts_intake_folder_id, '') as transcripts_intake_folder_id,\n  coalesce(c.drive_transcripts_completed_folder_id, '') as transcripts_done_folder_id,\n  coalesce(c.drive_summaries_intake_folder_id, '') as summaries_intake_folder_id,\n  coalesce(c.drive_summaries_completed_folder_id, '') as summaries_done_folder_id,\n  10::int as max_files_per_run\nfrom public.clients_registry c\nwhere c.status = 'active'\n  and (\n    (c.drive_transcripts_intake_folder_id is not null\n     and c.drive_transcripts_completed_folder_id is not null)\n    or\n    (c.drive_summaries_intake_folder_id is not null\n     and c.drive_summaries_completed_folder_id is not null)\n  )\norder by lower(c.display_name), c.client_id;",
+        "query": "select\n  c.client_id::text as client_id,\n  c.slug as client_slug,\n  c.display_name,\n  replace(coalesce(c.drive_transcripts_intake_folder_id, ''), E'\\\\_', '_')\n    as transcripts_intake_folder_id,\n  replace(coalesce(c.drive_transcripts_completed_folder_id, ''), E'\\\\_', '_')\n    as transcripts_done_folder_id,\n  replace(coalesce(c.drive_summaries_intake_folder_id, ''), E'\\\\_', '_')\n    as summaries_intake_folder_id,\n  replace(coalesce(c.drive_summaries_completed_folder_id, ''), E'\\\\_', '_')\n    as summaries_done_folder_id,\n  10::int as max_files_per_run\nfrom public.clients_registry c\nwhere c.status = 'active'\n  and (\n    (c.drive_transcripts_intake_folder_id is not null\n     and c.drive_transcripts_completed_folder_id is not null)\n    or\n    (c.drive_summaries_intake_folder_id is not null\n     and c.drive_summaries_completed_folder_id is not null)\n  )\norder by lower(c.display_name), c.client_id;",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
@@ -557,6 +557,63 @@
         }
       },
       "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select\n  $1::text as execution_id,\n  case\n    when count(*) filter (where status = 'failed') > 0 then 'completed_with_errors'\n    when count(*) filter (where status = 'succeeded') > 0 then 'completed'\n    else 'no_files_processed'\n  end as result,\n  count(*) filter (where status = 'succeeded')::int as files_ingested,\n  count(*) filter (where status = 'failed')::int as files_failed,\n  coalesce(\n    jsonb_agg(payload->>'file_name' order by finished_at)\n      filter (where status = 'succeeded'),\n    '[]'::jsonb\n  ) as ingested_files,\n  coalesce(\n    jsonb_agg(\n      jsonb_build_object(\n        'file_name', payload->>'file_name',\n        'error', error\n      ) order by finished_at\n    ) filter (where status = 'failed'),\n    '[]'::jsonb\n  ) as failed_files\nfrom public.job_runs\nwhere kind = 'ingest'\n  and payload->>'execution_id' = $1::text;",
+        "options": {
+          "queryReplacement": "={{ [$execution.id] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1712,
+        1632
+      ],
+      "id": "84d5131e-34ef-5c7e-b747-3b2dd69065b3",
+      "name": "Execution Summary",
+      "credentials": {
+        "postgres": {
+          "id": "VTTgsAJGmour7OLv",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "e4779711-63af-5617-ab7c-523f800903c6",
+              "leftValue": "={{ !$json.drive_search_error }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "006f7903-17a5-5cef-a58e-0c931659c53b",
+      "name": "Drive Search Succeeded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -256,
+        2240
+      ]
     }
   ],
   "connections": {
@@ -595,7 +652,13 @@
     },
     "Loop Over Workspaces": {
       "main": [
-        [],
+        [
+          {
+            "node": "Execution Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
         [
           {
             "node": "Find transcript files",
@@ -658,14 +721,14 @@
       "main": [
         [
           {
-            "node": "Sort Files Oldest First",
+            "node": "Sort Files Newest First",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Sort Files Oldest First": {
+    "Sort Files Newest First": {
       "main": [
         [
           {
@@ -724,6 +787,24 @@
       ]
     },
     "Extract File Identity": {
+      "main": [
+        [
+          {
+            "node": "Drive Search Succeeded?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Failure Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drive Search Succeeded?": {
       "main": [
         [
           {

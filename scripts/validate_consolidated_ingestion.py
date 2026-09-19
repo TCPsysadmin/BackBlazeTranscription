@@ -33,6 +33,19 @@ def validate(path: Path) -> None:
     assert "ingestion_sources" not in raw, "must use canonical clients_registry"
     assert "collaborative-process" not in raw, "must not hard-code a workspace"
     assert "test-company" not in raw, "must not hard-code a workspace"
+    drive_search_nodes = {
+        node["name"]: node for node in nodes if node["name"].startswith("Find ")
+    }
+    for name in ("Find transcript files", "Find summary files"):
+        folder_expression = drive_search_nodes[name]["parameters"]["filter"][
+            "folderId"
+        ]["value"]
+        assert folder_expression.startswith("={{"), (
+            f"{name} has malformed folder expression: {folder_expression}"
+        )
+        assert "$('Loop Over Workspaces').item.json." in folder_expression, (
+            f"{name} must read the active workspace-loop item"
+        )
 
     referenced_nodes = set(re.findall(r"\$\('([^']+)'\)", raw))
     assert not referenced_nodes - names, (
@@ -104,6 +117,8 @@ def validate(path: Path) -> None:
         "Record Drive Artifact",
         "Build Failure Record",
         "Log Failure",
+        "Execution Summary",
+        "Drive Search Succeeded?",
     }
     assert required <= names, f"required nodes missing: {sorted(required - names)}"
     assert "public.clients_registry" in raw
