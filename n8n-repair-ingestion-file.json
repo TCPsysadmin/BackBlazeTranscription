@@ -1,0 +1,218 @@
+{
+  "name": "VP Repair One Missing Ingestion File",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "repair-ingestion-file",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "repair-webhook",
+      "name": "Webhook: Repair Ingestion File",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "repair-ingestion-file"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || {};\nconst kind = String(body.kind || '').trim().toLowerCase();\nif (!['transcript', 'summary'].includes(kind)) {\n  throw new Error('kind must be transcript or summary');\n}\nfor (const field of ['filename', 'content', 'folder_id']) {\n  if (!String(body[field] || '').trim()) throw new Error(`Missing required field: ${field}`);\n}\nconst raw = String(body.filename).replace(/\\.(txt|md|mp4|mov|m4v|mp3|wav)$/i, '').trim();\nconst base = raw.replace(/[\\s_-]*(transcript|summary|summaryplaud)\\s*$/i, '').trim();\nif (!base) throw new Error('filename has no usable base name');\nreturn [{ json: {\n  kind,\n  filename: base,\n  target_filename: `${base}_${kind}.txt`,\n  content: String(body.content),\n  folder_id: String(body.folder_id)\n} }];"
+      },
+      "id": "repair-validate",
+      "name": "Validate Repair Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "returnAll": true,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "={{ $('Validate Repair Input').first().json.folder_id }}",
+            "mode": "id"
+          }
+        },
+        "options": {}
+      },
+      "id": "repair-list-folder",
+      "name": "List Destination Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [680, 300],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "0oZdbi7MJ9sBitgJ",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const expected = $('Validate Repair Input').first().json;\nconst existing = $input.all().map(item => item.json || {}).find(file => file.id && file.name === expected.target_filename);\nreturn [{ json: { ...expected, already_exists: Boolean(existing), existing_file_id: existing?.id || null, existing_url: existing?.webViewLink || (existing?.id ? `https://drive.google.com/file/d/${existing.id}/view` : null) } }];"
+      },
+      "id": "repair-check-existing",
+      "name": "Check Existing File",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "repair-already-exists-condition",
+              "leftValue": "={{ $json.already_exists }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "repair-already-exists",
+      "name": "Already Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1160, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { ok: true, reused: true, kind: $json.kind, filename: $json.target_filename, file_id: $json.existing_file_id, url: $json.existing_url } }];"
+      },
+      "id": "repair-reuse",
+      "name": "Reuse Existing File",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 200]
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "content",
+        "binaryPropertyName": "data",
+        "options": {
+          "encoding": "utf8",
+          "fileName": "={{ $json.target_filename }}"
+        }
+      },
+      "id": "repair-create-binary",
+      "name": "Create Text File",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [1400, 400]
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "name": "={{ $('Validate Repair Input').first().json.target_filename }}",
+        "driveId": {
+          "__rl": true,
+          "value": "0ACr6EEWxb_V3Uk9PVA",
+          "mode": "list",
+          "cachedResultName": "Admin",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/0ACr6EEWxb_V3Uk9PVA"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $('Validate Repair Input').first().json.folder_id }}",
+          "mode": "id"
+        },
+        "inputDataFieldName": "data",
+        "options": {
+          "mimeType": "text/plain"
+        }
+      },
+      "id": "repair-upload",
+      "name": "Upload Missing File",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1640, 400],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "0oZdbi7MJ9sBitgJ",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const uploaded = $input.first().json;\nconst expected = $('Validate Repair Input').first().json;\nreturn [{ json: { ok: true, reused: false, kind: expected.kind, filename: expected.target_filename, file_id: uploaded.id, url: uploaded.webViewLink || `https://drive.google.com/file/d/${uploaded.id}/view` } }];"
+      },
+      "id": "repair-shape-upload",
+      "name": "Shape Uploaded File",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1880, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "repair-respond",
+      "name": "Respond: Repair Result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2120, 300]
+    }
+  ],
+  "connections": {
+    "Webhook: Repair Ingestion File": {
+      "main": [[{"node": "Validate Repair Input", "type": "main", "index": 0}]]
+    },
+    "Validate Repair Input": {
+      "main": [[{"node": "List Destination Folder", "type": "main", "index": 0}]]
+    },
+    "List Destination Folder": {
+      "main": [[{"node": "Check Existing File", "type": "main", "index": 0}]]
+    },
+    "Check Existing File": {
+      "main": [[{"node": "Already Exists?", "type": "main", "index": 0}]]
+    },
+    "Already Exists?": {
+      "main": [
+        [{"node": "Reuse Existing File", "type": "main", "index": 0}],
+        [{"node": "Create Text File", "type": "main", "index": 0}]
+      ]
+    },
+    "Reuse Existing File": {
+      "main": [[{"node": "Respond: Repair Result", "type": "main", "index": 0}]]
+    },
+    "Create Text File": {
+      "main": [[{"node": "Upload Missing File", "type": "main", "index": 0}]]
+    },
+    "Upload Missing File": {
+      "main": [[{"node": "Shape Uploaded File", "type": "main", "index": 0}]]
+    },
+    "Shape Uploaded File": {
+      "main": [[{"node": "Respond: Repair Result", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "7c8b2a24-bfbf-4eab-a28e-047cd0eb8f93",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
